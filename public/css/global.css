@@ -1,0 +1,76 @@
+.container-fluid {
+    padding-top: 15px;
+}
+
+.datatable-standard {
+    width: 100% !important;
+}
+
+/* Vertical align all table cells. */
+table td, table th {
+  vertical-align: middle !important;
+}
+
+.layout-row {
+    margin-bottom: 15px;
+}
+
+.layout-row h1 {
+    margin-bottom: 0;
+}
+
+.ui-timepicker-viewport .ui-corner-all {
+    font-size: 1em;
+    font-family: Helvetica, Nunito;
+    font-weight: 300;
+    text-align: left;
+}
+
+.ui-timepicker-viewport .ui-state-hover {
+    background-color: #f8f8f8;
+    border: 1px solid #f8f8f8;
+}
+
+.datepicker > div.datepicker-days {
+    display: block;
+}
+
+#menu-toggle {
+    position: absolute;
+
+    top: 13px;
+    left: -14px;
+    width: 14px;
+    height: 30px;
+
+    border-top-left-radius: 50%;
+    border-bottom-left-radius: 50%;
+    border: 1px solid #dee2e6;
+    box-sizing: border-box;
+
+    background-color: #c0c0c0;
+    color: #fafafa;
+
+    cursor: pointer;
+    z-index: 100;
+}
+
+#menu-toggle:hover {
+    background-color: #a0a0a0;
+}
+
+.toggled #menu-toggle {
+    border-right: none;
+}
+
+.toggled #menu-toggle #menu-toggle-char {
+    left: 2px;
+}
+
+#menu-toggle-char {
+	position: relative;
+	left: 3px;
+	top: 3px;
+	font-size: 19px;
+	color: white;
+}

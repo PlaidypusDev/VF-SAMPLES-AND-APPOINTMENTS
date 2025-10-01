@@ -1,0 +1,36 @@
+.container-fluid {
+    padding-top: 15px;
+}
+
+.datatable-standard {
+    width: 100% !important;
+}
+
+/* Vertical align all table cells. */
+table td, table th {
+  vertical-align: middle !important;
+}
+
+.layout-row {
+    margin-bottom: 15px;
+}
+
+.layout-row h1 {
+    margin-bottom: 0;
+}
+
+.ui-timepicker-viewport .ui-corner-all {
+    font-size: 1em;
+    font-family: Helvetica, Nunito;
+    font-weight: 300;
+    text-align: left;
+}
+
+.ui-timepicker-viewport .ui-state-hover {
+    background-color: #f8f8f8;
+    border: 1px solid #f8f8f8;
+}
+
+.datepicker > div.datepicker-days {
+    display: block;
+}

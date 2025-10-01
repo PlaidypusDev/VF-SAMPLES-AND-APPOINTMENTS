@@ -1,0 +1,49 @@
+/node_modules
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+.env
+.env.backup
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+npm-debug.log
+yarn-error.log
+
+# alex additions below
+# Dependencies
+/vendor/
+/node_modules/
+
+# Environment & local config
+.env
+.env.*.backup
+.phpunit.result.cache
+
+# Laravel caches & runtime
+/bootstrap/cache/
+/storage/*
+!/storage/app/
+!/storage/app/public
+/storage/logs/
+/storage/framework/
+/storage/debugbar/
+
+# Frontend build artifacts (Laravel Mix or Vite)
+# Keep if they exist; harmless if not used.
+public/hot
+/public/mix-manifest.json
+/public/build/
+/public/vendor/*
+
+# IDE & misc
+/.idea/
+/.vscode/
+/*.log
+npm-debug.log*
+yarn-error.log*
+
+# OS noise
+.DS_Store
+Thumbs.db

@@ -1,0 +1,298 @@
+<?php
+namespace App\Http\Controllers;
+
+use Auth;
+use App\User;
+use Illuminate\Http\Request;
+use App\Post;
+use Illuminate\Support\Facades\DB;
+use Validator;
+
+use Illuminate\Support\Facades\Http;
+
+class VFController extends Controller
+{
+    public $api = 'http://internal.vaneefoods.com/AppointmentAPI.php';
+
+    public function schedule(Request $request) {
+        // Build the data array to pass to the template.
+        $data = array();
+
+	//session(['testsession' => 'testvalue']);
+	//echo session('testsession');
+
+        return view('vf.schedule', ['data' => $data]);
+    }
+
+    public function createOrder(Request $request) {
+
+	// Localize user input.
+	$order_type = $request->order_type;
+	$order_date = $request->date;
+	$order_time = $request->time;
+	$orders = $request->orders;
+
+	$order_email = $request->email;
+	$order_phone = $request->phone;
+	$order_carrier = $request->carrier;
+
+	// Format the selected date.
+	$order_date = str_replace("-", "/", $order_date);
+	$formatted_order_date = date("m/d/Y", strtotime($order_date));
+	$order_date = date("Y-m-d", strtotime($order_date));
+
+	// Format the time.
+	$time_in_24_hour_format  = date("H:i:s", strtotime($order_time));
+
+	// Concatenate the datetime.
+	$order_datetime = $order_date . " " . $time_in_24_hour_format;
+
+	// Build the request array.
+	$data = array();
+	$data['function'] = "createAppointment";
+	$data['appointmentType'] = $order_type;
+	$data['orders'] = $orders;
+	$data['appointmentDateTime'] = $order_datetime;
+	$data['emailAddress'] = $order_email;
+	$data['phone'] = $order_phone;
+	$data['carrier'] = $order_carrier;
+
+	// Create the URL for the request.
+	$query = $this->api . "?" . http_build_query($data);
+
+	// Query for the order.
+	$obj = json_decode(file_get_contents($query));
+
+	// Initialize array to store the response that we will send back.
+	$response = array();
+
+	if ($obj->createAppointmentResults) {
+	    $res = $obj->createAppointmentResults;
+
+	    // Fetch the status and identifier.
+	    $status = $res->status;
+	    $id = $res->id;
+
+	    $response['success'] = 1;
+	    $response['status'] = $status;
+	    $response['id'] = $id;
+	    $response['day'] = $formatted_order_date;
+
+	} else {
+	    $response['success'] = 0;
+	}
+
+	echo json_encode($response);
+	exit;
+    }
+
+    public function searchDate(Request $request) {
+	// Localize user input.
+	$order_type = $request->order_type;
+	$order_date = $request->order_date;
+	$order_weight = $request->order_weight;
+
+	// Format the selected date.
+	$order_date = str_replace("-", "/", $order_date);
+	$formatted_order_date = date("m/d/Y", strtotime($order_date));
+	$order_date = date("Y-m-d", strtotime($order_date));
+
+	// Build the request array.
+	$data = array();
+	$data['function'] = "searchAppointment";
+	$data['appointmentType'] = $order_type;
+	$data['totalWeight'] = $order_weight;
+	$data['requestedDate'] = $order_date;
+
+        // Create the URL for the request.
+        $query = $this->api . "?" . http_build_query($data);
+
+        // Query for the order.
+        $obj = json_decode(file_get_contents($query));
+
+        // Initialize array to store the response that we will send back.
+        $response = array();
+
+        // Check if a match was found.
+        if ($obj->searchAppointmentResults) {
+		$response['success'] = 1;
+		$response['date'] = $formatted_order_date;
+
+		// Create an array to store the available times.
+		$times = array();
+
+		// Loop through the available time slots.
+		foreach ($obj->searchAppointmentResults as $key => $time) {
+			$time_in_12_hour_format  = date("g:i A", strtotime($time));
+			$times[] = $time_in_12_hour_format;
+		}
+
+		$response['times'] = $times;
+	} else {
+		$response['success'] = 0;
+	}
+
+	echo json_encode($response);
+	exit;
+    }
+
+    public function validateLocation(Request $request) {
+        // Localize user input.
+	$order_id = $request->order_id;
+	$order_type = $request->order_type;
+	$city = $request->city;
+	$state = $request->state;
+
+	// Build the request array.
+	$data = array();
+	$data['function'] = "searchForOrder";
+        $data['appointmentType'] = $order_type;
+        $data['search'] = $order_id;
+
+        // Create the URL for the request.
+        $query = $this->api . "?" . http_build_query($data);
+
+        // Query for the order.
+        $obj = json_decode(file_get_contents($query));
+
+        // Initialize array to store the response that we will send back.
+        $response = array();
+
+        // Check if a match was found.
+        if ($obj->searchForOrderResults[0]) {
+
+		if ($obj->searchForOrderResults[0]->state == $state && $obj->searchForOrderResults[0]->city == $city) {
+			$response['success'] = 1;
+	                $response['order_type'] = $order_type;
+	                $response['order_id'] = $order_id;
+
+	                $response['customer_po'] = $obj->searchForOrderResults[0]->customer_po;
+	                $response['order_number'] = $obj->searchForOrderResults[0]->order_number;
+
+
+			/* We need to get the weight of the order, but that is not
+			   found in the same request as the validation information. */
+
+			$data = array();
+			$data['function'] = "viewOrder";
+			$data['appointmentType'] = $order_type;
+			$data['orderNumber'] = $order_id;
+
+		        // Create the URL for the request.
+		        $query = $this->api . "?" . http_build_query($data);
+
+		        // Query for the order.
+		        $obj = json_decode(file_get_contents($query));
+
+			// Add the weight to the response object.
+			$response['weight'] = $obj->viewOrderResults[0]->totalWeight;
+
+                } else {
+                        $response['success'] = 0;
+                }
+        } else {
+                $response['success'] = 0;
+        }
+
+        echo json_encode($response);
+        exit;
+    }
+
+    public function searchOrder(Request $request) {
+	// Localize user input.
+        $order_id = $request->order_id;
+	$order_type = $request->order_type;
+
+	// Build the request array.
+	$data = array();
+	$data['function'] = "searchForOrder";
+	$data['appointmentType'] = $order_type;
+	$data['search'] = $order_id;
+
+	// Create the URL for the request.
+	$query = $this->api . "?" . http_build_query($data);
+
+        // Query for the order.
+        $obj = json_decode(file_get_contents($query));
+
+	// Initialize array to store the response that we will send back.
+	$response = array();
+
+	// Check if a match was found.
+	if (isset($obj->searchForOrderResults[0])) {
+		$response['success'] = 1;
+
+		// Fetch the validation results.
+		$validation = $obj->searchForOrderResults[0]->validation;
+
+		// Create array to store locations.
+		$locations = array();
+
+		// Add the correct answer to the array.
+		$locations[] = array("city" => $obj->searchForOrderResults[0]->city, "state" => $obj->searchForOrderResults[0]->state);
+
+		// Loop through the validation results.
+		foreach ($validation  as $val) {
+			// Create a temporary array to store location.
+			$temp = array();
+			$temp['city'] = $val->city;
+			$temp['state'] = $val->state;
+
+			// Add this entry to the locations array.
+			$locations[] = $temp;
+		}
+
+		// Randomize the order of elements.
+		shuffle($locations);
+
+		$response['locations'] = $locations;
+		$response['order_type'] = $order_type;
+		$response['order_id'] = $order_id;
+
+		//$response['customer_po'] = $obj->searchForOrderResults[0]->customer_po;
+		//$response['order_number'] = $obj->searchForOrderResults[0]->order_number;
+	} else {
+		$response['success'] = 0;
+	}
+
+	echo json_encode($response);
+        exit;
+    }
+
+    public function sampleOrder(Request $request) {
+        header("Content-Type: application/json");
+
+        // Generate JSON.
+        $data = array("order_number" => "193983", "customer_po" => "SO-48483", "depositor_po_number" => "SO-48483", "vanee_location" => "2759 S 25TH AVE, BROADVIEW, IL");
+
+
+        /*
+        "order_number": {
+        "optional": false,
+        "dataType": "TEXT",
+        "exampleValue": "193983"
+        },
+        "customer_po": {
+        "optional": false,
+        "dataType": "TEXT",
+        "exampleValue": "SO-48483"
+        },
+        "depositor_po_number": {
+        "optional": false,
+        "dataType": "TEXT",
+        "exampleValue": "SO-48483"
+        },
+        "vanee_location": {
+        "optional": false,
+        "dataType": "TEXT",
+        "exampleValue": "2759 S 25TH AVE, BROADVIEW, IL"
+        }
+        */
+
+
+        echo json_encode($data);
+
+        exit;
+    }
+
+}
