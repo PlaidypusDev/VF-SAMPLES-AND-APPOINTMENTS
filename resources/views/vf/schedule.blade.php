@@ -187,6 +187,7 @@
     var last_order_count = 0;
     var latest_ship_date = null;
     var latest_ship_date_raw = null;
+    var lastRenderSig = null;
 
     function GetTableHead() {
 	return `
@@ -292,6 +293,7 @@
 		$(".view").hide();
 		//("#information-view").show();
 		$("#schedule-view").show();
+        forceRepaint();
 		//$("#back-button").show();
 
 		step = 4;
@@ -305,6 +307,7 @@
 	  } else {
 	    $(".view").hide();
 	    $("#schedule-view").show();
+        forceRepaint();
 	    //$("#back-button").show();
 
 	    var step = 3;
@@ -647,6 +650,7 @@
 		if ($("#information-view").is(":visible")) {
 			$(".view").hide();
 			$("#schedule-view").show();
+            forceRepaint();
 			$("#schedule-next").show();
 			$(".remove-order").hide();
 
@@ -691,6 +695,7 @@
 		$("#orders-next").hide();
 		$("#schedule-order-type").html(friendly_order_type);
 		$("#schedule-view").show();
+        forceRepaint();
 		//$("#back-button").show();
 		$(".remove-order").hide();
 
@@ -700,7 +705,12 @@
 		//if (!$("#vanee-logo").hasClass("smaller-logo"))
 		//        $("#vanee-logo").addClass("smaller-logo");
 
-		$(".table-row").collapse();
+		// $(".table-row").collapse();
+        last_order_count = -1;
+        UpdateTotals();
+        // try this to ensure nested rows are shown
+        // $(".nested-data.collapse").collapse('show');
+
 	});
 
 	/*
@@ -1050,6 +1060,7 @@
 		$("#orders-next").show();
 		$("#schedule-next").hide();
 		$(".remove-order").show();
+        forceRepaint();  
     });
 
     $("#pbar-2").click(function() {
@@ -1059,6 +1070,7 @@
 
 		$(".view").hide();
 		$("#schedule-view").show();
+        forceRepaint();
 		$("#orders-next").hide();
 		$(".remove-order").hide();
 
@@ -1144,6 +1156,27 @@
     });
 
     function UpdateTotals() {
+    // Find the visible container for rendering.
+    var $target = $(".view:visible .orders-container");
+    if (!$target.length) return; // nothing to render into on this view
+
+    // gather the orders to render
+    var orderIds = [];
+    $("#order-search-view .order-item").each(function () {
+        orderIds.push($(this).data("order-number"));
+    });
+
+    // Include the active view id so switching tabs always triggers a repaint.
+    var activeViewId = $(".view:visible").attr("id") || "none";
+    var renderSig = activeViewId + "|" + orderIds.join(",") + "|" + total_orders;
+    if (renderSig === lastRenderSig) return;
+
+    if (orderIds.length === 0) {
+        $target.empty().hide();
+        lastRenderSig = renderSig;
+        return;
+    }
+
 	// Initialize variables to store totals.
 	var total_pallets = 0;
 	var total_weight = 0;
@@ -1213,10 +1246,6 @@
 
 	total_weight = numberWithCommas(total_weight);
 
-	if (total_orders == last_order_count)
-		return;
-	else
-		last_order_count = total_orders;
 
 	html += `
 		<tr class="table-row totals-row">
@@ -1227,10 +1256,12 @@
 		</tr>
 	`;
 
-	$(".orders-container").html(html);
 
-	if (total_orders > 0)
-		$(".orders-container").show();
+    var $target = $(".view:visible .orders-container");
+    $target.html(html);
+
+    if (total_orders > 0) $target.show();
+    lastRenderSig = renderSig;
 
 	// For PICKUP, update the earliest date field.
 	if (selected_order_type == "PICKUP") {
@@ -1265,6 +1296,10 @@
 	return [month, day, year].join('/');
     }
 
+    function forceRepaint() {
+        lastRenderSig = null;
+        UpdateTotals();
+    }
 
 </script>
 
