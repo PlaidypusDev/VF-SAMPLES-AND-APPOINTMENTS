@@ -189,6 +189,19 @@
     var latest_ship_date_raw = null;
     var lastRenderSig = null;
 
+    function friendlyOrderType() {
+        return (selected_order_type === "DELIVER") ? "Delivery" : "Pick Up";
+    }
+
+    function refreshOrderTypeLabels() {
+        // Update any UI badges that show the friendly type
+        $("#schedule-order-type").text(friendlyOrderType());
+    }
+
+    function getDateHeader() {
+        return (selected_order_type === "DELIVER") ? "Delivery Date" : "Ship Date";
+    }
+
     function GetTableHead() {
 	return `
 		<table class='orders-table table table-hover table-bordered'>
@@ -197,7 +210,7 @@
 					<th scope="col">PO</th>
 					<th scope="col">Weight</th>
 					<th scope="col">Pallets</th>
-					<th scope="col">Ship Date</th>
+                    <th scope="col">${getDateHeader()}</th>
 					<th scope="col">City</th>
 					<!--th scope="col" class="mobile-collapse">State</th-->
 					<th scope="col" class="mobile-collapse">Action</th>
@@ -401,6 +414,16 @@
 	    $("#carrier").val(localStorage.getItem("vf.carrier"));
 
 	@endif
+
+    $("#pick-up").on("click", function () {
+        selected_order_type = "PICKUP";
+        refreshOrderTypeLabels();
+    });
+
+    $("#deliver").on("click", function () {
+        selected_order_type = "DELIVER";
+        refreshOrderTypeLabels();
+    });
 
 	// Button to update a completed order...
 	$("#update-order").click(function() {
@@ -693,7 +716,7 @@
 
 		$(".view").hide();
 		$("#orders-next").hide();
-		$("#schedule-order-type").html(friendly_order_type);
+        refreshOrderTypeLabels();
 		$("#schedule-view").show();
         forceRepaint();
 		//$("#back-button").show();
@@ -977,6 +1000,7 @@
 
 					selected_order_id = order_id;
 					selected_order_type = order_type;
+                    refreshOrderTypeLabels();
 
 					// Create a friendly string for the order type.
 					var friendly_order_type = (order_type == "DELIVER") ? "Delivery" : "Pick Up";
