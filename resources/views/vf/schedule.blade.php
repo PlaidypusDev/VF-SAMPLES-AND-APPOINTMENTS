@@ -546,24 +546,9 @@
 		// Validation: Get the selected date.
 		var date = $("#select-datepicker").val();
 
-	    if (date.length == 10) {
-			var temp_date = new Date(date);
-			var temp_date_format = temp_date.toLocaleDateString("en-US");
-		
-			//console.log(temp_date);console.log(latest_ship_date);
-
-			if (temp_date < latest_ship_date) {
-				alert("You must choose a date after the latest ship date.");
-
-				$("#schedule-next").hide();
-				$("#select-time").hide();
-
-				return;
-			}
-		} else {
+	    if (date.length != 10) {
 			$("#schedule-next").hide();
 			$("#select-time").hide();
-
 			return;
 		}
 
@@ -586,18 +571,6 @@
 	    var date = $(this).val();
 
 	    if (date.length == 10 /*&& date != selected_date*/) {
-			var temp_date = new Date(date);
-			var temp_date_format = temp_date.toLocaleDateString("en-US");
-
-			//console.log(temp_date);console.log(latest_ship_date);
-
-			if (temp_date < latest_ship_date) {
-				alert("You must choose a date after the latest ship date.");
-				$("#schedule-next").hide();
-				$("#select-time").hide();
-				return;
-			}
-
 			selected_date = date;
 
 			// Remove the next button, if it happens to be visible at this point.
