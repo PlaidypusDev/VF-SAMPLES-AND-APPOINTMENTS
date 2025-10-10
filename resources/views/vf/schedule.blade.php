@@ -201,7 +201,25 @@
     }
 
     function getDateHeader() {
-        return (selected_order_type === "DELIVER") ? "Delivery Date" : "Ship Date";
+    function normalizeDate(d) {
+        var x = new Date(d);
+        x.setHours(0,0,0,0);
+        return x;
+    }
+
+    function enforcePickupMinDateOrAbort(tempDate) {
+        // Only enforce for PICKUP and when we have a computed latest_ship_date
+        if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            var chosen = normalizeDate(tempDate);
+            var min    = normalizeDate(latest_ship_date);
+            if (chosen < min) {
+                showAlert("warning", "For pickups, choose a date on or after the latest pickup date.");
+                $("#schedule-next").hide();
+                $("#select-time").hide();
+                return false; 
+            }
+        }
+        return true; 
     }
 
     function showAlert(type, msg) {
@@ -610,6 +628,9 @@
 			return;
 		}
 
+        // block too-early dates for PICKUP
+        var tempDate = new Date(date);
+        if (!enforcePickupMinDateOrAbort(tempDate)) return;
 
 		selected_time = $(this).data("time");
 
@@ -629,6 +650,12 @@
 	    var date = $(this).val();
 
 	    if (date.length == 10 /*&& date != selected_date*/) {
+
+            var tempDate = new Date(date);
+            if (!enforcePickupMinDateOrAbort(tempDate)) {
+                return; 
+            }
+
 			selected_date = date;
 
 			// Remove the next button, if it happens to be visible at this point.
