@@ -201,6 +201,9 @@
     }
 
     function getDateHeader() {
+        return (selected_order_type === "DELIVER") ? "Delivery Date" : "Pickup Date";
+    }
+
     function normalizeDate(d) {
         var x = new Date(d);
         x.setHours(0,0,0,0);
@@ -339,6 +342,7 @@
 		$(".view").hide();
 		//("#information-view").show();
 		$("#schedule-view").show();
+        refreshOrderTypeLabels();
         forceRepaint();
 		//$("#back-button").show();
 
@@ -353,6 +357,7 @@
 	  } else {
 	    $(".view").hide();
 	    $("#schedule-view").show();
+        refreshOrderTypeLabels(); 
         forceRepaint();
 	    //$("#back-button").show();
 
@@ -1152,6 +1157,7 @@
 
 		$(".view").hide();
 		$("#schedule-view").show();
+        refreshOrderTypeLabels();
         forceRepaint();
 		$("#orders-next").hide();
 		$(".remove-order").hide();
