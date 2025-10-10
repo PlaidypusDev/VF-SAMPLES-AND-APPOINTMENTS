@@ -7,6 +7,7 @@
 <div class="row justify-content-center" style="text-align: center;">
     <div class="col-xl-6 col-lg-7 col-md-8 col-sm-12 col-xs-12" style="margin-top: 3.5rem; margin-bottom: 4rem;">
         <img src="{{ asset('public/images/logo.png') }}" id="vanee-logo" class="mb-2 smaller-logo" style="max-width: 65%;" />
+        <div id="global-alerts" class="mt-3"></div> 
 
 <div class="progress" style="margin-top: 1rem !important; height: 2rem; font-size: 0.9rem;">
   <div id="pbar-1" class="progress-bar" role="progressbar" style="width: 33%" aria-valuenow="15" aria-valuemin="0" aria-valuemax="100">Orders</div>
@@ -28,6 +29,7 @@
 			<span id="confirmation-location" style="font-weight: bold;"></span>
 		</p>
 
+		<div id="cancel-appointment" class="btn btn-danger btn-lg mt-3">Cancel Appointment</div>
 		<div id="update-order" class="btn btn-primary btn-lg mt-3">Update Order</div>
 
 		<button class="btn btn-primary btn-lg mt-3" onClick="document.location='/';">New Order</button>
@@ -201,6 +203,19 @@
     function getDateHeader() {
         return (selected_order_type === "DELIVER") ? "Delivery Date" : "Ship Date";
     }
+
+    function showAlert(type, msg) {
+        // type: 'success' | 'danger' | 'warning' | 'info'
+        var html = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${msg}
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+            </button>
+            </div>`;
+        $("#global-alerts").html(html);
+    }
+
 
     function GetTableHead() {
 	return `
@@ -540,6 +555,49 @@
 			$("#information-error").html(html);
 	    }
 	});
+
+    $("#cancel-appointment").on("click", function () {
+        var $btn = $(this);
+
+        var id = $("#confirmation-number").text().trim() || confirmation_code;
+        var token = vanee_token;
+
+        if (!id || !token) {
+            alert("Missing appointment id or token — cannot cancel.");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to cancel this appointment?")) return;
+
+        // Prevent double-clicks
+        if ($btn.hasClass("busy")) return;
+        $btn.addClass("busy").prop("disabled", true).text("Cancelling…");
+
+        $.get("/vf/cancel-appointment/", { id, token })
+            .done(function (res) {
+                if (res.http_status === 200) {
+                    $("#appointment-string").text("Status:");
+                    $("#confirmation-time").html("Appointment canceled");
+                    $("#location-string").text("");
+                    $("#confirmation-location").text("");
+                    $("#cancel-appointment, #update-order").hide();
+
+                    showAlert("success", "Appointment canceled. Redirecting to home…")
+
+                    setTimeout(function () {
+                        window.location = "/";
+                    }, 1600);
+                } else {
+                    showAlert("danger", "Could not cancel appointment (status " + res.http_status + ").");
+                    $("#cancel-appointment").removeClass("already-clicked");
+                }
+            })
+            .fail(function () {
+                showAlert("danger", "Network error while canceling appointment.");
+                $("#cancel-appointment").removeClass("already-clicked");
+            });
+    });
+
 
 	// When a time is selected.
 	$("body").on("click", ".select-time-button", function() {

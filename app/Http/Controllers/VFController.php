@@ -367,6 +367,39 @@ class VFController extends Controller
 	exit;
     }
 
+    public function deleteAppointment(Request $request) {
+        $id    = $request->query('id');
+        $token = $request->query('token');
+
+        if (!$id || !$token) {
+            return response()->json(['success' => 0, 'message' => 'Missing id/token'], 400);
+        }
+
+        $params = [
+            'function' => 'deleteAppointment',
+            'id'       => $id,
+            'token'    => $token,
+        ];
+
+        try {
+            $resp = Http::timeout(10)->get($this->api, $params);
+            $code = $resp->status(); 
+
+            return response()->json([
+                'success'     => ($code >= 200 && $code < 300) ? 1 : 0,
+                'http_status' => $code,
+                // pass through body later if needed 'upstream' => $resp->json(),
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success'     => 0,
+                'http_status' => 0,
+                'message'     => 'Network error contacting upstream',
+            ], 200);
+        }
+    }
+
+
     public function searchDate(Request $request) {
 	// Localize user input.
 	$order_type = $request->order_type;
