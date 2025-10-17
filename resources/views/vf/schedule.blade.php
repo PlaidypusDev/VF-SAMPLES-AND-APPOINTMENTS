@@ -225,8 +225,9 @@
         return true; 
     }
 
-    function showAlert(type, msg) {
-        // type: 'success' | 'danger' | 'warning' | 'info'
+    function showAlert(type, msg, opts) {
+        // opts: { append?: boolean, timeout?: number }
+        opts = opts || {};
         var html = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert">
             ${msg}
@@ -234,7 +235,20 @@
                 <span aria-hidden="true">&times;</span>
             </button>
             </div>`;
-        $("#global-alerts").html(html);
+        var $wrap = $("#global-alerts");
+
+        if (opts.append) {
+            $wrap.append(html);
+        } else {
+            $wrap.html(html);
+        }
+
+        if (opts.timeout) {
+            // auto-dismiss the lastest alert inserted
+            setTimeout(function () {
+            $wrap.find(".alert").last().alert("close");
+            }, opts.timeout);
+        }
     }
 
 
@@ -544,20 +558,33 @@
 					$("#appointment-string").html(friendly + " Appointment:");
 					$("#location-string").html(friendly + " At:");
 					$("#confirmation-location").html(response.vanee_location);
+
+                    var isCritical = response.critical_order === true || response.critical_order === 1 || response.critical_order === "1";
+
+                    var alert_order_type = (friendly === "Pickup" ?  friendly : `${friendly}y`).toLowerCase();
+
+                    if (isCritical) {
+                        document.body.classList.add("critical-mode");
+                        showAlert(
+                            "danger",
+                            `<strong>CRITICAL ORDER:</strong> production may stop if this ${alert_order_type} order isn't on time.`,
+                        );
+                    }
                
                     var daysEarly = parseInt(response.days_early, 10) || 0;
                     var daysLate  = parseInt(response.days_late, 10) || 0;
 
-                    var alert_order_type = (friendly === "Pickup" ?  friendly : `${friendly}y`).toLowerCase();
                     if (daysEarly > 0) {
                         showAlert(
                             "warning",
-                            "Heads up: this appointment is <strong>" + daysEarly + "</strong> day" + (daysEarly === 1 ? "" : "s") + " <strong>early</strong> based on your " + alert_order_type + " date."
+                            "WARNING: this appointment is <strong>" + daysEarly + "</strong> day" + (daysEarly === 1 ? "" : "s") + " <strong>early</strong> based on your " + alert_order_type + " date.",
+                            { append: true } // don't overwrite critical alert
                         );
                     } else if (daysLate > 0) {
                         showAlert(
                             "warning",
-                            "Heads up: this appointment is <strong>" + daysLate + "</strong> day" + (daysLate === 1 ? "" : "s") + " <strong>late</strong> based on your " + alert_order_type +  " date."
+                            "WARNING: this appointment is <strong>" + daysLate + "</strong> day" + (daysLate === 1 ? "" : "s") + " <strong>late</strong> based on your " + alert_order_type +  " date.",
+                            { append: true } // don't overwrite critical alert
                         );
                     }
 
@@ -1639,6 +1666,56 @@
     .existing-block #information-view {
     display: none !important;
     }
+
+    /* Softer critical backdrop (cool rose, distinct from alert red) */
+    :root {
+    --critical-bg: #f6d2d8;   /* background */
+    --critical-bg-alt: #f6cfe1; /* slightly deeper option */
+    }
+
+    body.critical-mode {
+    background-color: var(--critical-bg) !important;
+    transition: background-color 160ms ease-in;
+    }
+
+    /* Keep content panels readable */
+    body.critical-mode .card,
+    body.critical-mode .orders-table,
+    body.critical-mode .list-group,
+    body.critical-mode .input-group,
+    body.critical-mode .form-control {
+    background: #fff;
+    }
+
+    /* --- Make alert-danger deeper so it stands out on the soft bg --- */
+    #global-alerts .alert-danger,
+    .alert-danger {
+    background-color: #c62828 !important; /* deep red */
+    border-color: #b71c1c !important;
+    color: #fff !important;
+    }
+
+    /* Ensure links/buttons inside the red alert are readable */
+    #global-alerts .alert-danger a,
+    .alert-danger a {
+    color: #fff;
+    text-decoration: underline;
+    }
+
+    /* Optional: bold the title-y bits inside alerts for scanability */
+    #global-alerts .alert strong,
+    .alert strong {
+    font-weight: 700;
+    }
+
+
+
+    /* Smooth switch-in */
+    body { transition: background-color 160ms ease-in; }
+
+    /* Tighter stack spacing for multiple alerts */
+    #global-alerts .alert + .alert { margin-top: .5rem; }
+
 </style>
 
 @endsection
