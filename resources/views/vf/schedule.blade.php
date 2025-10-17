@@ -544,6 +544,22 @@
 					$("#appointment-string").html(friendly + " Appointment:");
 					$("#location-string").html(friendly + " At:");
 					$("#confirmation-location").html(response.vanee_location);
+               
+                    var daysEarly = parseInt(response.days_early, 10) || 0;
+                    var daysLate  = parseInt(response.days_late, 10) || 0;
+
+                    var alert_order_type = (friendly === "Pickup" ?  friendly : `${friendly}y`).toLowerCase();
+                    if (daysEarly > 0) {
+                        showAlert(
+                            "warning",
+                            "Heads up: this appointment is <strong>" + daysEarly + "</strong> day" + (daysEarly === 1 ? "" : "s") + " <strong>early</strong> based on your " + alert_order_type + " date."
+                        );
+                    } else if (daysLate > 0) {
+                        showAlert(
+                            "warning",
+                            "Heads up: this appointment is <strong>" + daysLate + "</strong> day" + (daysLate === 1 ? "" : "s") + " <strong>late</strong> based on your " + alert_order_type +  " date."
+                        );
+                    }
 
 					step = 4;
 					UpdatePB();

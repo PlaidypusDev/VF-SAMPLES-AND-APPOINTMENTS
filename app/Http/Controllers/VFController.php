@@ -363,12 +363,21 @@ class VFController extends Controller
             // Fetch the status and identifier.
             $status = $res->status;
             $id = $res->id;
+	        $detailsArray = $res->details;
+            $details = (is_array($detailsArray) && isset($detailsArray[0])) ? $detailsArray[0] : null;
 
             $response['success'] = 1;
             $response['status'] = $status;
             $response['id'] = $id;
             $response['day'] = $formatted_order_date;
-	    $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
+            $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
+
+            if ($details) {
+                $response['days_early'] = $details->days_early;
+                $response['days_late'] = $details->days_late;
+                $response['critical_order'] = $details->critical_order;
+                $response['existing_appointments'] = $details->existing_appointments;
+            }
 	  } else {
 	    $response['success'] = 0;
 	  }
@@ -380,6 +389,8 @@ class VFController extends Controller
 	      $status = $res->status;
 	      $id = $res->id;
 	      $token = $res->token;
+          $detailsArray = $res->details;
+          $details = (is_array($detailsArray) && isset($detailsArray[0])) ? $detailsArray[0] : null;
 
 	      $response['success'] = 1;
 	      $response['status'] = $status;
@@ -388,6 +399,12 @@ class VFController extends Controller
 	      $response['day'] = $formatted_order_date;
 	      $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
 
+          if ($details) {
+            $response['days_early'] = $details->days_early;
+            $response['days_late'] = $details->days_late;
+            $response['critical_order'] = $details->critical_order;
+            $response['existing_appointments'] = $details->existing_appointments;
+          }
 	  } else {
 	      $response['success'] = 0;
 	  }
