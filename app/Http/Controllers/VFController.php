@@ -162,6 +162,8 @@ class VFController extends Controller
 	if (isset($request->orders)) {
 	    $order_type = $request->order_type;
 
+        $existingHits = [];  // collect all orders that already have appointments
+
 	    // Initialize array of orders.
 	    $template['orders'] = array();
 
@@ -188,6 +190,20 @@ class VFController extends Controller
 
 		// Check if a match was found.
 		if (isset($obj->searchForOrderResults[0]) && $obj->searchForOrderResults[0]) {
+
+            $existing = $obj->searchForOrderResults[0]->existing_appointments ?? [];
+            if (!is_array($existing)) {
+                $existing = $existing ? [$existing] : [];
+            }
+        
+            if (count($existing) > 0) {
+                $existingHits[] = [
+                    'order'        => (string)$order_id,
+                    'appointments' => $existing,
+                ];
+                continue;
+            }
+
 			// Build an array with the data we need.
                         $response['order_type'] = $order_type;
                         $response['order_id'] = $order_id;
@@ -238,6 +254,20 @@ class VFController extends Controller
 			exit;
 		}
 	    }
+
+        if (!empty($existingHits)) {
+            // Build a concise message, e.g., list the orders that are blocked
+            $orderList = implode(', ', array_map(fn($x) => $x['order'], $existingHits));
+        
+            $template['existing_block'] = [
+                'code'    => 'EXISTING_APPOINTMENT',
+                'message' => "An appointment already exists for order(s): {$orderList}. Redirecting home 5 seconds",
+                'redirect'=> url('/'),
+                'details' => $existingHits, // just sending so FE can inspect
+            ];
+        
+            return view('vf.schedule', ['data' => $template]);
+        }
 
 	    // Add the date to the template array.
 	    $template['date'] = date("m/d/Y", strtotime($request->date));

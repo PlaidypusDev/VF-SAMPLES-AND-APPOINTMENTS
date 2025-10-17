@@ -265,6 +265,8 @@
 
     $(document).ready(function() {
 
+        if (window.__EXISTING_BLOCK__) { return; }
+
 	@if (isset($data['json']))
 	  var json = $.parseJSON("{!! $data['json'] !!}");
 
@@ -1389,6 +1391,29 @@
         UpdateTotals();
     }
 
+    @if (!empty($data['existing_block']))
+        // hard guard so downstream init doesn't show views again
+        window.__EXISTING_BLOCK__ = true;
+
+        // pre-hide immediately (no jQuery needed)
+        document.documentElement.classList.add('existing-block');
+
+        document.addEventListener('DOMContentLoaded', function () {
+        // If jQuery is there, hide everything schedule-ish
+        if (window.jQuery) {
+            $('#schedule-view, #select-date, #select-time, #schedule-next, #orders-next, #order-search-view, #information-view').hide();
+        }
+
+        var payload = @json($data['existing_block']);
+        if (typeof showAlert === 'function') {
+            showAlert('danger', payload.message || 'An appointment already exists.');
+        } else {
+            alert(payload.message || 'An appointment already exists.');
+        }
+        setTimeout(function(){ window.location.assign(payload.redirect || '/'); }, 5000);
+        });
+    @endif
+
 </script>
 
 <style>
@@ -1586,6 +1611,17 @@
 
     #schedule-view .mobile-collapse, #success-view .mobile-collapse {
 	display: none;
+    }
+
+    /* prevent flicker while JS loads */
+    .existing-block #schedule-view,
+    .existing-block #select-date,
+    .existing-block #select-time,
+    .existing-block #schedule-next,
+    .existing-block #orders-next,
+    .existing-block #order-search-view,
+    .existing-block #information-view {
+    display: none !important;
     }
 </style>
 
