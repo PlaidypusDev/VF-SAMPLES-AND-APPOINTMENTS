@@ -621,6 +621,13 @@ class VFController extends Controller
 
 
 		$existing_appointments = $obj->searchForOrderResults[0]->existing_appointments;
+		$days_early = $obj->searchForOrderResults[0]->days_early;
+		$days_late = $obj->searchForOrderResults[0]->days_late;
+		$ship_date = $obj->searchForOrderResults[0]->ship_date; 
+
+        $response['days_early'] = $days_early;
+        $response['days_late'] = $days_late;
+        $response['ship_date'] = $ship_date;
 
 		// Check if this appointment already exists.
 		if ($existing_appointments) {
