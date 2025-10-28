@@ -579,6 +579,12 @@ class VFController extends Controller
 			$response['state'] = $obj->viewOrderResults[0]->state;
 			$response['pallet_count'] = $obj->viewOrderResults[0]->palletCount;
 			$response['ship_date'] = date("m/d/Y", strtotime($obj->viewOrderResults[0]->ship_date));
+
+            $days_early = $obj->viewOrderResults[0]->days_early;
+            $days_late = $obj->viewOrderResults[0]->days_late;
+            $response['days_early'] = $days_early;
+            $response['days_late'] = $days_late;
+
 			$response['depositor_po'] = $obj->viewOrderResults[0]->depositor_po_number;
 
 			if ($response['depositor_po'] == " ")
