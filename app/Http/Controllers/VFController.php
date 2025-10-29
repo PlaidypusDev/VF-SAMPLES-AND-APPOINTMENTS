@@ -57,11 +57,35 @@ class VFController extends Controller
 			$response['appointment_datetime'] = $res->appointment_datetime;
 			$response['orders'] = array();
 
+            $maxDaysEarly = null;
+            $maxDaysLate  = null;
+            $anyCritical  = false;
+
 			foreach ($res->orders as $order_id) {
 
 				$order_response = array();
 				$order_response['order_type'] = $res->type;
 				$order_response['order_id'] = $order_id;
+
+                // read nested details straight off the viewAppointment payload
+                $details = isset($order_id->details) ? $order_id->details : null;
+                if ($details) {
+                    $order_response['days_early'] = isset($details->days_early) ? (int)$details->days_early : null;
+                    $order_response['days_late']  = isset($details->days_late)  ? (int)$details->days_late  : null;
+                    $order_response['critical_order'] =
+                        !empty($details->critical_order) &&
+                        ($details->critical_order === true || $details->critical_order === 1 || $details->critical_order === "1" || $details->critical_order === "true");
+
+                    if ($order_response['days_early'] !== null) {
+                        $maxDaysEarly = max($maxDaysEarly ?? $order_response['days_early'], $order_response['days_early']);
+                    }
+                    if ($order_response['days_late'] !== null) {
+                        $maxDaysLate = max($maxDaysLate ?? $order_response['days_late'], $order_response['days_late']);
+                    }
+                    if ($order_response['critical_order']) {
+                        $anyCritical = true;
+                    }
+                }
 
 				$data = array();
                                 $data['function'] = "viewOrder";
@@ -144,12 +168,38 @@ class VFController extends Controller
 			$response['information'] = $res->information;
 		}
 
+        $vanee_location = '';
+        if (!empty($res->orders) && isset($res->orders[0]->details)) {
+            $det = $res->orders[0]->details;
+
+            // $ship_to_name   = isset($det->ship_to_name)   ? trim((string)$det->ship_to_name)   : '';
+            $address_line   = isset($det->address)        ? trim((string)$det->address)        : '';
+            $city_state_zip = isset($det->city_state_zip) ? trim((string)$det->city_state_zip) : '';
+
+            $parts = [];
+            // if ($ship_to_name !== '') { $parts[] = $ship_to_name; }
+            if ($address_line !== '') { $parts[] = $address_line; }
+            if ($city_state_zip !== '') { $parts[] = $city_state_zip; }
+
+            if (!empty($parts)) {
+                $vanee_location = implode("<br />", array_map('htmlspecialchars', $parts));
+            }
+        }
+        $response['vanee_location'] = $vanee_location;
+
 		// Add the date to the template array.
 		$template = $response;
 		$template['date'] = date("m/d/Y", strtotime($response['appointment_datetime']));
 		$template['time'] = date("g:i A", strtotime($response['appointment_datetime']));
 		$template['order_type'] = $res->type;
 		$template['view'] = "update";
+
+        $template['days_early']     = $maxDaysEarly;
+        $template['days_late']      = $maxDaysLate;
+        $template['critical_order'] = $anyCritical;
+
+        $template['ui'] = ($request->ui === 'edit') ? 'edit' : 'summary';
+
 		$json = json_encode($template);
 
 		$json = preg_replace("_\\\_", "\\\\\\", $json);

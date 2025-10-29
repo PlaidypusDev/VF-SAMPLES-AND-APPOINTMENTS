@@ -452,20 +452,42 @@
 		$("#email").val(json['email']);
 		$("#carrier").val(json['carrier']);
 
-		$(".view").hide();
-		//("#information-view").show();
-		$("#schedule-view").show();
-        refreshOrderTypeLabels();
-        forceRepaint();
-		//$("#back-button").show();
+        var friendlyTitle = (json.order_type === "PICKUP" ? "Pickup" : "Deliver");
 
-		step = 4;
-		UpdatePB();
+        if (json.ui === 'edit') {
+            // existing schedule screen
+            $(".view").hide();
+            $("#schedule-view").show();
+            refreshOrderTypeLabels();
+            forceRepaint();
 
-		if (!$("#vanee-logo").hasClass("smaller-logo"))
-			$("#vanee-logo").addClass("smaller-logo");
+            step = 4;
+            UpdatePB();
 
-		selected_time = json['time'];
+            if (!$("#vanee-logo").hasClass("smaller-logo"))
+                $("#vanee-logo").addClass("smaller-logo");
+
+            selected_time = json['time'];
+        } else {
+            // confirmation screen -- this will be linked/navigated to from blakes other system
+            $("#appointment-string").text(friendlyTitle + " Appointment:");
+            $("#location-string").text(friendlyTitle + " At:");
+            $("#confirmation-number").text(json.id || "");
+            $("#confirmation-time").html((json.date || "") + (json.time ? "<br />" + json.time : ""));
+            $("#confirmation-location").html(json.vanee_location || "");
+
+            $(".view").hide();
+            $("#success-view").show();
+
+            $("#create-order").hide();
+            $("#orders-next").hide();
+            $("#schedule-next").hide();
+            $(".progress").hide();
+
+            if (!$("#vanee-logo").hasClass("smaller-logo"))
+                $("#vanee-logo").addClass("smaller-logo");
+        }
+
 
 	  } else {
 	    $(".view").hide();
@@ -577,11 +599,10 @@
     });
 
 	// Button to update a completed order...
-	$("#update-order").click(function() {
-		var confirmation = $("#confirmation-number").html();
-
-		window.location = "?update=" + confirmation + "&token=" + vanee_token;
-	});
+    $("#update-order").click(function() {
+        var confirmation = $("#confirmation-number").text().trim();
+        window.location = "?update=" + confirmation + "&token=" + encodeURIComponent(vanee_token) + "&ui=edit";
+    });
 
 	// Schedule Order
 	$("#create-order").click(function() {
