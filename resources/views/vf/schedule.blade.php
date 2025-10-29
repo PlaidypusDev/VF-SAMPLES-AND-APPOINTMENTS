@@ -191,6 +191,97 @@
     var latest_ship_date_raw = null;
     var lastRenderSig = null;
 
+    var __daysEarly = null;
+    var __daysLate  = null;
+    var __currentWindow = null; // { min: Date, max: Date }
+
+    function toDateAtMidnight(val) {
+        if (!val) return null;
+        let d;
+        if (typeof val === 'string') {
+            if (/^\d{4}-\d{2}-\d{2}/.test(val)) { // YYYY-MM-DD
+                const [yyyy, mm, dd] = val.split(/[-T]/)[0].split('-').map(n => parseInt(n,10));
+                d = new Date(yyyy, mm - 1, dd);
+            } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) { // MM/DD/YYYY
+                const [mm, dd, yyyy] = val.split('/').map(n => parseInt(n,10));
+                d = new Date(yyyy, mm - 1, dd);
+            } else {
+                d = new Date(val);
+            }
+        } else {
+            d = new Date(val);
+        }
+        if (isNaN(d)) return null;
+        d.setHours(0,0,0,0);
+        return d;
+    }
+
+    function buildWindowFromBaseline(daysEarly, daysLate, baselineLike) {
+        const e = parseInt(daysEarly,10) || 0;
+        const l = parseInt(daysLate,10)  || 0;
+
+        const today = new Date(); today.setHours(0,0,0,0);
+        const baseline = toDateAtMidnight(baselineLike);
+
+        // If baseline (ship_date) is future, center window on it; else start at today
+        let min, max;
+        if (baseline && baseline >= today) {
+            min = new Date(baseline); min.setDate(min.getDate() - e);
+            if (min < today) min = new Date(today);  // no past selection
+            max = new Date(baseline); max.setDate(max.getDate() + l);
+        } else {
+            min = new Date(today);
+            max = new Date(today); max.setDate(max.getDate() + l);
+        }
+
+        // Also respect PICKUP's latest_ship_date floor
+        if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            const ls = toDateAtMidnight(latest_ship_date);
+            if (ls && min < ls) min = ls;
+        }
+
+        return { min, max };
+    }
+
+    function applyDatepickerWindow(daysEarly, daysLate, baselineLike, options) {
+        __daysEarly = (daysEarly != null ? parseInt(daysEarly,10) : null);
+        __daysLate  = (daysLate  != null ? parseInt(daysLate,10)  : null);
+        if (__daysEarly == null && __daysLate == null) return;
+
+        const win = buildWindowFromBaseline(__daysEarly || 0, __daysLate || 0, baselineLike);
+        __currentWindow = win;
+
+        $('#select-datepicker').datepicker('setStartDate', win.min);
+        $('#select-datepicker').datepicker('setEndDate',   win.max);
+
+        if (!options || options.silent !== true) {
+            const msg = `You can schedule between ${win.min.toLocaleDateString('en-US')} and ${win.max.toLocaleDateString('en-US')}.`;
+            showAlert('info', msg); // replace instead of append
+        }
+
+        const cur = $('#select-datepicker').val();
+        if (cur && !validateDateInWindow(toDateAtMidnight(cur))) {
+            $('#select-datepicker').val('');
+            selected_date = '';
+            selected_time = '';
+            $("#select-time").hide();
+            $("#schedule-next").hide();
+        }
+    }
+
+    function validateDateInWindow(dLike) {
+        const d = toDateAtMidnight(dLike);
+        if (!d) return false;
+
+        if (__currentWindow) {
+            if (d < __currentWindow.min || d > __currentWindow.max) return false;
+        } else if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            const min = toDateAtMidnight(latest_ship_date);
+            if (min && d < min) return false;
+        }
+        return true;
+    }
+
     function friendlyOrderType() {
         return (selected_order_type === "DELIVER") ? "Delivery" : "Pick Up";
     }
@@ -227,6 +318,7 @@
 
     function showAlert(type, msg, opts) {
         // opts: { append?: boolean, timeout?: number }
+        if ($('#select-location').is(':visible')) return;
         opts = opts || {};
         var html = `
             <div class="alert alert-${type} alert-dismissible fade show" role="alert">
@@ -251,6 +343,11 @@
         }
     }
 
+    function clearSchedulingInfoAlerts() {
+        try { $("#global-alerts .alert-info").alert("close"); } catch(e) {
+            $("#global-alerts .alert-info").remove();
+        }
+    }
 
     function GetTableHead() {
 	return `
@@ -802,6 +899,7 @@
 
 	// Scheduling: Next
 	$("body").on("click", "#schedule-next", function() {
+        clearSchedulingInfoAlerts();
 		$(".view").hide();
 		$("#schedule-next").hide();
 		$("#information-view").show();
@@ -1110,6 +1208,10 @@
 					selected_order_type = order_type;
                     refreshOrderTypeLabels();
 
+                    if (response.days_early != null || response.days_late != null) {
+                        applyDatepickerWindow(response.days_early, response.days_late, response.ship_date, { silent: true });
+                    }
+
 					// Create a friendly string for the order type.
 					var friendly_order_type = (order_type == "DELIVER") ? "Delivery" : "Pick Up";
 
@@ -1231,6 +1333,7 @@
     $(".progress-bar").click(function() {
 	if ($(this).hasClass("pbar-disabled"))
 	    return;
+        clearSchedulingInfoAlerts();
 
         $(".progress-bar").removeClass('active');
 
@@ -1338,6 +1441,16 @@
 			latest_ship_date = ship_date;
 			latest_ship_date_raw = ship_date_raw;
 		}
+
+        if (__daysEarly != null || __daysLate != null) {
+            applyDatepickerWindow(
+                __daysEarly,
+                __daysLate,
+                latest_ship_date_raw,
+                { silent: !$("#order-search-view").is(":visible") }
+            );
+        }
+
 
 		total_pallets += pallet_count;
 		total_weight += parseInt(weight);
