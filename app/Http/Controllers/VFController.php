@@ -373,10 +373,14 @@ class VFController extends Controller
             $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
 
             if ($details) {
-                $response['days_early'] = $details->days_early;
-                $response['days_late'] = $details->days_late;
-                $response['critical_order'] = $details->critical_order;
-                $response['existing_appointments'] = $details->existing_appointments;
+                $response['days_early'] = isset($details->days_early) ? (int) $details->days_early : null;
+                $response['days_late']  = isset($details->days_late)  ? (int) $details->days_late  : null;
+            
+                $response['critical_order'] = !empty($details->critical_order) ? (bool) $details->critical_order : false;
+            
+                $response['existing_appointments'] = (isset($details->existing_appointments) && is_array($details->existing_appointments))
+                    ? $details->existing_appointments
+                    : [];
             }
 	  } else {
 	    $response['success'] = 0;
@@ -399,12 +403,16 @@ class VFController extends Controller
 	      $response['day'] = $formatted_order_date;
 	      $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
 
-          if ($details) {
-            $response['days_early'] = $details->days_early;
-            $response['days_late'] = $details->days_late;
-            $response['critical_order'] = $details->critical_order;
-            $response['existing_appointments'] = $details->existing_appointments;
-          }
+        if ($details) {
+            $response['days_early'] = isset($details->days_early) ? (int) $details->days_early : null;
+            $response['days_late']  = isset($details->days_late)  ? (int) $details->days_late  : null;
+        
+            $response['critical_order'] = !empty($details->critical_order) ? (bool) $details->critical_order : false;
+        
+            $response['existing_appointments'] = (isset($details->existing_appointments) && is_array($details->existing_appointments))
+                ? $details->existing_appointments
+                : [];
+        }
 	  } else {
 	      $response['success'] = 0;
 	  }
