@@ -455,10 +455,34 @@
         var friendlyTitle = (json.order_type === "PICKUP" ? "Pickup" : "Deliver");
 
         if (json.ui === 'edit') {
-            // existing schedule screen
+            //  enforce the days_early/days_late window on edit ---
+            $('#select-datepicker').datepicker();
+
+            // compute baseline as the latest ship_date across orders (falls back to json.ship_date)
+            var baseline = null;
+            if (Array.isArray(json.orders)) {
+                for (var i = 0; i < json.orders.length; i++) {
+                    var o = json.orders[i];
+                    var cand = o.ship_date || (o.details && o.details.ship_date);
+                    var d = toDateAtMidnight(cand);
+                    if (d && (!baseline || d > baseline)) {
+                        baseline = d;
+                    }
+                }
+            }
+
+            if (!baseline && json.ship_date) {
+                baseline = toDateAtMidnight(json.ship_date);
+            }
+
+            if (json.days_early != null || json.days_late != null) {
+                applyDatepickerWindow(json.days_early, json.days_late, baseline, { silent: true });
+            }
+
             $(".view").hide();
             $("#schedule-view").show();
             refreshOrderTypeLabels();
+            // Now render; UpdateTotals won't blow away the window because it's already set
             forceRepaint();
 
             step = 4;
@@ -469,7 +493,7 @@
 
             selected_time = json['time'];
         } else {
-            // confirmation screen -- this will be linked/navigated to from blakes other system
+            // confirmation screen -- this will be linked/navigated to from blake's other system
             $("#appointment-string").text(friendlyTitle + " Appointment:");
             $("#location-string").text(friendlyTitle + " At:");
             $("#confirmation-number").text(json.id || "");
