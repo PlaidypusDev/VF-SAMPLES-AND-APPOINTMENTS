@@ -257,7 +257,8 @@
 
         if (!options || options.silent !== true) {
             const msg = `You can schedule between ${win.min.toLocaleDateString('en-US')} and ${win.max.toLocaleDateString('en-US')}.`;
-            showAlert('info', msg); // replace instead of append
+            clearAlertTypes(["info"]);
+            showAlert('info', msg, { append: true });
         }
 
         const cur = $('#select-datepicker').val();
@@ -390,6 +391,7 @@
         if (opts.append) {
             $wrap.append(html);
         } else {
+            $wrap.find(".alert-" + type).remove();
             $wrap.html(html);
         }
 
@@ -431,30 +433,58 @@
         });
     }
 
-    function updateEarlyLateAlertOnly(daysEarly, daysLate, orderType /* "PICKUP"|"DELIVER" */) {
-        // Always replace the prior warning (no stacking)
-        clearAlertTypes(["warning"]);
+    function updateEarlyLateAlertFromDates(baselineLike, chosenLike, orderType /* "PICKUP"|"DELIVER" */) {
+        clearAlertTypes(["warning"]); // never stack
 
-        var friendly = (orderType === "PICKUP" ? "pickup" : "delivery");
-        var e = parseInt(daysEarly, 10) || 0;
-        var l = parseInt(daysLate, 10) || 0;
+        const chosen = toDateAtMidnight(chosenLike);
+        const base   = toDateAtMidnight(baselineLike);
+        if (!chosen || !base) return; // no date picked yet or no baseline => no warning
 
-        if (e > 0) {
+        const friendly = (orderType === "PICKUP" ? "pickup" : "delivery");
+        const { early, late } = computeEarlyLate(base, chosen);
+
+        if (early > 0) {
             showAlert(
-                "warning",
-                "WARNING: this appointment is <strong>" + e + "</strong> day" + (e === 1 ? "" : "s") +
-                " <strong>early</strong> based on your " + friendly + " date.",
-                { append: true }
+            "warning",
+            `WARNING: this appointment is <strong>${early}</strong> day${early === 1 ? "" : "s"} <strong>early</strong> based on your ${friendly} date.`,
+            { append: true }
             );
-        } else if (l > 0) {
+        } else if (late > 0) {
             showAlert(
-                "warning",
-                "WARNING: this appointment is <strong>" + l + "</strong> day" + (l === 1 ? "" : "s") +
-                " <strong>late</strong> based on your " + friendly + " date.",
-                { append: true }
+            "warning",
+            `WARNING: this appointment is <strong>${late}</strong> day${late === 1 ? "" : "s"} <strong>late</strong> based on your ${friendly} date.`,
+            { append: true }
             );
         }
     }
+
+    function diffInDaysUTC(aLike, bLike) {
+        // returns integer days (b - a); negative => b earlier than a
+        const a = toDateAtMidnight(aLike);
+        const b = toDateAtMidnight(bLike);
+        if (!a || !b) return null;
+        const ms = b.getTime() - a.getTime();
+        return Math.round(ms / 86400000);
+    }
+
+    function computeEarlyLate(baselineLike, chosenLike) {
+        const d = diffInDaysUTC(baselineLike, chosenLike);
+        if (d == null) return { early: 0, late: 0 };
+        if (d < 0) return { early: Math.abs(d), late: 0 }; // chosen before baseline -> early
+        if (d > 0) return { early: 0, late: d };           // chosen after baseline -> late
+        return { early: 0, late: 0 };                      // same day
+    }
+
+
+    function showWindowBannerIfPossible() {
+        if (!$('#schedule-view').is(':visible')) return;
+        // ensure DP is initialized before setting start/end bounds
+        $('#select-datepicker').datepicker();
+        if (__daysEarly != null || __daysLate != null) {
+            applyDatepickerWindow(__daysEarly, __daysLate, latest_ship_date_raw, { silent: false });
+        }
+    }
+
 
     function coerceTrueish(v){
         if (v === true) return true;
@@ -590,6 +620,7 @@
             $('#select-datepicker').datepicker(); // ensure initialized
             if (json.days_early != null || json.days_late != null) {
                 applyDatepickerWindow(json.days_early, json.days_late, baseline, { silent: false });
+                updateEarlyLateAlertFromDates(baseline, json.date, json.order_type);
             }
 
             // Critical: once, no duplicates
@@ -599,8 +630,6 @@
                 (json.order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
             );
 
-            // Refresh the single early/late warning (replaces prior warning)
-            updateEarlyLateAlertOnly(json.days_early, json.days_late, json.order_type);
 
             forceRepaint();
             step = 4;
@@ -628,8 +657,10 @@
                 (json.order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
             );
 
-            // Refresh the single early/late warning (replaces prior warning)
-            updateEarlyLateAlertOnly(json.days_early, json.days_late, json.order_type);
+            const baseline = computeBaselineFromJson(json) || json.ship_date || null;
+            if (baseline && json.date) {
+                updateEarlyLateAlertFromDates(baseline, json.date, json.order_type);
+            }
 
             $(".view").hide();
             $("#success-view").show();
@@ -846,21 +877,14 @@
                         );
                     }
                
-                    var daysEarly = parseInt(response.days_early, 10) || 0;
-                    var daysLate  = parseInt(response.days_late, 10) || 0;
-
-                    if (daysEarly > 0) {
-                        showAlert(
-                            "warning",
-                            "WARNING: this appointment is <strong>" + daysEarly + "</strong> day" + (daysEarly === 1 ? "" : "s") + " <strong>early</strong> based on your " + alert_order_type + " date.",
-                            { append: true } // don't overwrite critical alert
-                        );
-                    } else if (daysLate > 0) {
-                        showAlert(
-                            "warning",
-                            "WARNING: this appointment is <strong>" + daysLate + "</strong> day" + (daysLate === 1 ? "" : "s") + " <strong>late</strong> based on your " + alert_order_type +  " date.",
-                            { append: true } // don't overwrite critical alert
-                        );
+                    // Recompute using our local baseline and the user's chosen date.
+                    // Do NOT use response.days_early/days_late (those reflect the API's prior calc).
+                    clearAlertTypes(["warning"]);
+                    var baselineLike =
+                    latest_ship_date_raw ||       // best: built while scheduling from the orders we added
+                    (response.ship_date || null); // fallback if API returns it
+                    if (baselineLike && selected_date) {
+                        updateEarlyLateAlertFromDates(baselineLike, selected_date, selected_order_type);
                     }
 
 					step = 4;
@@ -983,6 +1007,10 @@
 
 			selected_date = date;
 
+            if (latest_ship_date_raw) {
+                updateEarlyLateAlertFromDates(latest_ship_date_raw, selected_date, selected_order_type);
+            }
+
 			// Remove the next button, if it happens to be visible at this point.
 			$("#schedule-next").hide();
 
@@ -1104,6 +1132,16 @@
 		$("#schedule-view").show();
         if (__isCritical) document.body.classList.add("critical-mode");
         forceRepaint();
+
+        showWindowBannerIfPossible();
+
+        (function () {
+            var currentPick = $("#select-datepicker").val(); // may be ""
+            if (latest_ship_date_raw) {
+                updateEarlyLateAlertFromDates(latest_ship_date_raw, currentPick, selected_order_type);
+            }
+        })();
+
 		//$("#back-button").show();
 		$(".remove-order").hide();
 
@@ -1274,7 +1312,8 @@
                 }
 
                 // When the schedule view is eventually shown, re-render the banners without stacking:
-                updateEarlyLateAlertOnly(response.days_early, response.days_late, selected_order_type);
+                updateEarlyLateAlertFromDates(response.ship_date, $("#select-datepicker").val(), selected_order_type);
+
                 // Optional (once-only danger banner when not on location view):
                 ensureCriticalAlertOnce(
                     isCritical,
@@ -1511,6 +1550,7 @@
 
 		$(".view").hide();
 		$("#schedule-view").show();
+        showWindowBannerIfPossible();
         refreshOrderTypeLabels();
         forceRepaint();
 		$("#orders-next").hide();
@@ -1649,15 +1689,9 @@
 			latest_ship_date_raw = ship_date_raw;
 		}
 
-        if (__daysEarly != null || __daysLate != null) {
-            applyDatepickerWindow(
-                __daysEarly,
-                __daysLate,
-                latest_ship_date_raw,
-                { silent: !$("#order-search-view").is(":visible") }
-            );
+        if ($('#schedule-view').is(':visible') && (__daysEarly != null || __daysLate != null)) {
+            applyDatepickerWindow(__daysEarly, __daysLate, latest_ship_date_raw, { silent: true });
         }
-
 
 		total_pallets += pallet_count;
 		total_weight += parseInt(weight);
