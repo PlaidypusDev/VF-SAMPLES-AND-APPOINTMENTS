@@ -604,6 +604,11 @@ class VFController extends Controller
 			$response['customer_po'] = $obj->searchForOrderResults[0]->customer_po;
 	                $response['order_number'] = $obj->searchForOrderResults[0]->order_number;
 
+            $critical_order = $obj->searchForOrderResults[0]->critical_order ?? null; 
+        
+            $response['critical_order'] = 
+                ($critical_order === true || $critical_order === 1 || $critical_order === "1" || $critical_order === "true");
+
 			/* We need to get the weight of the order, but that is not
 			   found in the same request as the validation information. */
 
@@ -688,10 +693,13 @@ class VFController extends Controller
 		$days_early = $obj->searchForOrderResults[0]->days_early;
 		$days_late = $obj->searchForOrderResults[0]->days_late;
 		$ship_date = $obj->searchForOrderResults[0]->ship_date; 
+		$critical_order = $obj->searchForOrderResults[0]->critical_order ?? null; 
 
         $response['days_early'] = $days_early;
         $response['days_late'] = $days_late;
         $response['ship_date'] = $ship_date;
+        $response['critical_order'] =
+                        ($critical_order === true || $critical_order === 1 || $critical_order === "1" || $critical_order === "true");
 
 		// Check if this appointment already exists.
 		if ($existing_appointments) {

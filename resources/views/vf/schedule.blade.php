@@ -194,6 +194,7 @@
     var __daysEarly = null;
     var __daysLate  = null;
     var __currentWindow = null; // { min: Date, max: Date }
+    var __isCritical = false
 
     function toDateAtMidnight(val) {
         if (!val) return null;
@@ -301,6 +302,8 @@
         var alert_order_type = (friendly === "Pickup" ? "pickup" : "delivery");
 
         var isCritical = payload.critical_order === true || payload.critical_order === 1 || payload.critical_order === "1";
+        __isCritical = coerceTrueish(payload.critical_order) || __isCritical;
+
         if (isCritical) {
             document.body.classList.add("critical-mode");
             showAlert(
@@ -375,6 +378,15 @@
             </div>`;
         var $wrap = $("#global-alerts");
 
+         //  If this is critical, force the background class
+        var isCriticalBanner =
+            !!opts.critical ||
+            (type === 'danger' && /critical order/i.test(stripTags(msg)));
+
+        if (isCriticalBanner) {
+            document.body.classList.add("critical-mode");
+        }
+
         if (opts.append) {
             $wrap.append(html);
         } else {
@@ -444,6 +456,21 @@
         }
     }
 
+    function coerceTrueish(v){
+        if (v === true) return true;
+        if (typeof v === 'number') return v === 1;
+        if (typeof v === 'string') {
+            var s = v.trim().toLowerCase();
+            return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+        }
+        return false;
+    }
+
+    function stripTags(s){ 
+        return String(s).replace(/<[^>]+>/g, ''); 
+    }
+
+
     function GetTableHead() {
 	return `
 		<table class='orders-table table table-hover table-bordered'>
@@ -475,6 +502,7 @@
 
 	@if (isset($data['json']))
 	  var json = $.parseJSON("{!! $data['json'] !!}");
+      __isCritical = coerceTrueish(json && json.critical_order);
 
 	  if (json['view'] == "update") {
 
@@ -554,6 +582,8 @@
             var baseline = computeBaselineFromJson(json);
             $(".view").hide();
             $("#schedule-view").show();
+            if (__isCritical) document.body.classList.add("critical-mode");
+
             refreshOrderTypeLabels();
 
             // Init/refresh datepicker window BEFORE alerts (so the info banner is correct)
@@ -803,6 +833,8 @@
 					$("#confirmation-location").html(response.vanee_location);
 
                     var isCritical = response.critical_order === true || response.critical_order === 1 || response.critical_order === "1";
+                    __isCritical = coerceTrueish(response.critical_order) || __isCritical;
+
 
                     var alert_order_type = (friendly === "Pickup" ?  friendly : `${friendly}y`).toLowerCase();
 
@@ -1070,6 +1102,7 @@
 		$("#orders-next").hide();
         refreshOrderTypeLabels();
 		$("#schedule-view").show();
+        if (__isCritical) document.body.classList.add("critical-mode");
         forceRepaint();
 		//$("#back-button").show();
 		$(".remove-order").hide();
@@ -1221,6 +1254,34 @@
 				*/
 
 	            $(".orders").prepend(html);
+
+                var isCritical = (response.critical_order === true) ||
+                                (response.critical_order === 1) ||
+                                (response.critical_order === "1") ||
+                                (typeof response.critical_order === "string" &&
+                                response.critical_order.toLowerCase() === "true");
+
+                // Flip the red backdrop right away (even if alerts are suppressed)
+                if (isCritical) {
+                    document.body.classList.add("critical-mode");
+                } else {
+                    document.body.classList.remove("critical-mode");
+                }
+
+                // Stash/refresh window + warning for when we move to schedule view
+                if (response.days_early != null || response.days_late != null) {
+                    applyDatepickerWindow(response.days_early, response.days_late, response.ship_date, { silent: true });
+                }
+
+                // When the schedule view is eventually shown, re-render the banners without stacking:
+                updateEarlyLateAlertOnly(response.days_early, response.days_late, selected_order_type);
+                // Optional (once-only danger banner when not on location view):
+                ensureCriticalAlertOnce(
+                    isCritical,
+                    "<strong>CRITICAL ORDER:</strong> production may stop if this " +
+                    (selected_order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
+                );
+
 
 				$(".expand-collapse-info").removeClass("show");
 				$(".order-item[data-order-number=" + order_number + "]").click();
