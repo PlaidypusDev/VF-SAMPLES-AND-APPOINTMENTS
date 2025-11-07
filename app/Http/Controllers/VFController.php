@@ -643,8 +643,8 @@ class VFController extends Controller
 			$response['pallet_count'] = $obj->viewOrderResults[0]->palletCount;
 			$response['ship_date'] = date("m/d/Y", strtotime($obj->viewOrderResults[0]->ship_date));
 
-            $days_early = $obj->viewOrderResults[0]->days_early;
-            $days_late = $obj->viewOrderResults[0]->days_late;
+            $days_early = $obj->viewOrderResults[0]->days_early ?? 0;
+            $days_late = $obj->viewOrderResults[0]->days_late ?? 0;
             $response['days_early'] = $days_early;
             $response['days_late'] = $days_late;
 
@@ -690,8 +690,8 @@ class VFController extends Controller
 
 
 		$existing_appointments = $obj->searchForOrderResults[0]->existing_appointments;
-		$days_early = $obj->searchForOrderResults[0]->days_early;
-		$days_late = $obj->searchForOrderResults[0]->days_late;
+		$days_early = $obj->searchForOrderResults[0]->days_early ?? 0;
+		$days_late = $obj->searchForOrderResults[0]->days_late ?? 0;
 		$ship_date = $obj->searchForOrderResults[0]->ship_date; 
 		$critical_order = $obj->searchForOrderResults[0]->critical_order ?? null; 
 
