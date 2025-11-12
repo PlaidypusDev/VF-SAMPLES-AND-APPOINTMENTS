@@ -57,11 +57,35 @@ class VFController extends Controller
 			$response['appointment_datetime'] = $res->appointment_datetime;
 			$response['orders'] = array();
 
+            $maxDaysEarly = null;
+            $maxDaysLate  = null;
+            $anyCritical  = false;
+
 			foreach ($res->orders as $order_id) {
 
 				$order_response = array();
 				$order_response['order_type'] = $res->type;
 				$order_response['order_id'] = $order_id;
+
+                // read nested details straight off the viewAppointment payload
+                $details = isset($order_id->details) ? $order_id->details : null;
+                if ($details) {
+                    $order_response['days_early'] = isset($details->days_early) ? (int)$details->days_early : null;
+                    $order_response['days_late']  = isset($details->days_late)  ? (int)$details->days_late  : null;
+                    $order_response['critical_order'] =
+                        !empty($details->critical_order) &&
+                        ($details->critical_order === true || $details->critical_order === 1 || $details->critical_order === "1" || $details->critical_order === "true");
+
+                    if ($order_response['days_early'] !== null) {
+                        $maxDaysEarly = max($maxDaysEarly ?? $order_response['days_early'], $order_response['days_early']);
+                    }
+                    if ($order_response['days_late'] !== null) {
+                        $maxDaysLate = max($maxDaysLate ?? $order_response['days_late'], $order_response['days_late']);
+                    }
+                    if ($order_response['critical_order']) {
+                        $anyCritical = true;
+                    }
+                }
 
 				$data = array();
                                 $data['function'] = "viewOrder";
@@ -144,12 +168,38 @@ class VFController extends Controller
 			$response['information'] = $res->information;
 		}
 
+        $vanee_location = '';
+        if (!empty($res->orders) && isset($res->orders[0]->details)) {
+            $det = $res->orders[0]->details;
+
+            // $ship_to_name   = isset($det->ship_to_name)   ? trim((string)$det->ship_to_name)   : '';
+            $address_line   = isset($det->address)        ? trim((string)$det->address)        : '';
+            $city_state_zip = isset($det->city_state_zip) ? trim((string)$det->city_state_zip) : '';
+
+            $parts = [];
+            // if ($ship_to_name !== '') { $parts[] = $ship_to_name; }
+            if ($address_line !== '') { $parts[] = $address_line; }
+            if ($city_state_zip !== '') { $parts[] = $city_state_zip; }
+
+            if (!empty($parts)) {
+                $vanee_location = implode("<br />", array_map('htmlspecialchars', $parts));
+            }
+        }
+        $response['vanee_location'] = $vanee_location;
+
 		// Add the date to the template array.
 		$template = $response;
 		$template['date'] = date("m/d/Y", strtotime($response['appointment_datetime']));
 		$template['time'] = date("g:i A", strtotime($response['appointment_datetime']));
 		$template['order_type'] = $res->type;
 		$template['view'] = "update";
+
+        $template['days_early']     = $maxDaysEarly;
+        $template['days_late']      = $maxDaysLate;
+        $template['critical_order'] = $anyCritical;
+
+        $template['ui'] = ($request->ui === 'edit') ? 'edit' : 'summary';
+
 		$json = json_encode($template);
 
 		$json = preg_replace("_\\\_", "\\\\\\", $json);
@@ -161,6 +211,8 @@ class VFController extends Controller
 	// Check if we need to pre-build the layout based on provided order data.
 	if (isset($request->orders)) {
 	    $order_type = $request->order_type;
+
+        $existingHits = [];  // collect all orders that already have appointments
 
 	    // Initialize array of orders.
 	    $template['orders'] = array();
@@ -188,6 +240,20 @@ class VFController extends Controller
 
 		// Check if a match was found.
 		if (isset($obj->searchForOrderResults[0]) && $obj->searchForOrderResults[0]) {
+
+            $existing = $obj->searchForOrderResults[0]->existing_appointments ?? [];
+            if (!is_array($existing)) {
+                $existing = $existing ? [$existing] : [];
+            }
+        
+            if (count($existing) > 0) {
+                $existingHits[] = [
+                    'order'        => (string)$order_id,
+                    'appointments' => $existing,
+                ];
+                continue;
+            }
+
 			// Build an array with the data we need.
                         $response['order_type'] = $order_type;
                         $response['order_id'] = $order_id;
@@ -238,6 +304,20 @@ class VFController extends Controller
 			exit;
 		}
 	    }
+
+        if (!empty($existingHits)) {
+            // Build a concise message, e.g., list the orders that are blocked
+            $orderList = implode(', ', array_map(fn($x) => $x['order'], $existingHits));
+        
+            $template['existing_block'] = [
+                'code'    => 'EXISTING_APPOINTMENT',
+                'message' => "An appointment already exists for order(s): {$orderList}. Redirecting home 5 seconds",
+                'redirect'=> url('/'),
+                'details' => $existingHits, // just sending so FE can inspect
+            ];
+        
+            return view('vf.schedule', ['data' => $template]);
+        }
 
 	    // Add the date to the template array.
 	    $template['date'] = date("m/d/Y", strtotime($request->date));
@@ -333,12 +413,25 @@ class VFController extends Controller
             // Fetch the status and identifier.
             $status = $res->status;
             $id = $res->id;
+	        $detailsArray = $res->details;
+            $details = (is_array($detailsArray) && isset($detailsArray[0])) ? $detailsArray[0] : null;
 
             $response['success'] = 1;
             $response['status'] = $status;
             $response['id'] = $id;
             $response['day'] = $formatted_order_date;
-	    $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
+            $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
+
+            if ($details) {
+                $response['days_early'] = isset($details->days_early) ? (int) $details->days_early : null;
+                $response['days_late']  = isset($details->days_late)  ? (int) $details->days_late  : null;
+            
+                $response['critical_order'] = !empty($details->critical_order) ? (bool) $details->critical_order : false;
+            
+                $response['existing_appointments'] = (isset($details->existing_appointments) && is_array($details->existing_appointments))
+                    ? $details->existing_appointments
+                    : [];
+            }
 	  } else {
 	    $response['success'] = 0;
 	  }
@@ -350,6 +443,8 @@ class VFController extends Controller
 	      $status = $res->status;
 	      $id = $res->id;
 	      $token = $res->token;
+          $detailsArray = $res->details;
+          $details = (is_array($detailsArray) && isset($detailsArray[0])) ? $detailsArray[0] : null;
 
 	      $response['success'] = 1;
 	      $response['status'] = $status;
@@ -358,6 +453,16 @@ class VFController extends Controller
 	      $response['day'] = $formatted_order_date;
 	      $response['vanee_location'] = $res->vanee_location->address . "<br />" . $res->vanee_location->city_state_zip;
 
+        if ($details) {
+            $response['days_early'] = isset($details->days_early) ? (int) $details->days_early : null;
+            $response['days_late']  = isset($details->days_late)  ? (int) $details->days_late  : null;
+        
+            $response['critical_order'] = !empty($details->critical_order) ? (bool) $details->critical_order : false;
+        
+            $response['existing_appointments'] = (isset($details->existing_appointments) && is_array($details->existing_appointments))
+                ? $details->existing_appointments
+                : [];
+        }
 	  } else {
 	      $response['success'] = 0;
 	  }
@@ -366,6 +471,39 @@ class VFController extends Controller
 	echo json_encode($response);
 	exit;
     }
+
+    public function deleteAppointment(Request $request) {
+        $id    = $request->query('id');
+        $token = $request->query('token');
+
+        if (!$id || !$token) {
+            return response()->json(['success' => 0, 'message' => 'Missing id/token'], 400);
+        }
+
+        $params = [
+            'function' => 'deleteAppointment',
+            'id'       => $id,
+            'token'    => $token,
+        ];
+
+        try {
+            $resp = Http::timeout(10)->get($this->api, $params);
+            $code = $resp->status(); 
+
+            return response()->json([
+                'success'     => ($code >= 200 && $code < 300) ? 1 : 0,
+                'http_status' => $code,
+                // pass through body later if needed 'upstream' => $resp->json(),
+            ], 200);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success'     => 0,
+                'http_status' => 0,
+                'message'     => 'Network error contacting upstream',
+            ], 200);
+        }
+    }
+
 
     public function searchDate(Request $request) {
 	// Localize user input.
@@ -466,6 +604,11 @@ class VFController extends Controller
 			$response['customer_po'] = $obj->searchForOrderResults[0]->customer_po;
 	                $response['order_number'] = $obj->searchForOrderResults[0]->order_number;
 
+            $critical_order = $obj->searchForOrderResults[0]->critical_order ?? null; 
+        
+            $response['critical_order'] = 
+                ($critical_order === true || $critical_order === 1 || $critical_order === "1" || $critical_order === "true");
+
 			/* We need to get the weight of the order, but that is not
 			   found in the same request as the validation information. */
 
@@ -499,6 +642,12 @@ class VFController extends Controller
 			$response['state'] = $obj->viewOrderResults[0]->state;
 			$response['pallet_count'] = $obj->viewOrderResults[0]->palletCount;
 			$response['ship_date'] = date("m/d/Y", strtotime($obj->viewOrderResults[0]->ship_date));
+
+            $days_early = $obj->viewOrderResults[0]->days_early ?? 0;
+            $days_late = $obj->viewOrderResults[0]->days_late ?? 0;
+            $response['days_early'] = $days_early;
+            $response['days_late'] = $days_late;
+
 			$response['depositor_po'] = $obj->viewOrderResults[0]->depositor_po_number;
 
 			if ($response['depositor_po'] == " ")
@@ -541,6 +690,16 @@ class VFController extends Controller
 
 
 		$existing_appointments = $obj->searchForOrderResults[0]->existing_appointments;
+		$days_early = $obj->searchForOrderResults[0]->days_early ?? 0;
+		$days_late = $obj->searchForOrderResults[0]->days_late ?? 0;
+		$ship_date = $obj->searchForOrderResults[0]->ship_date; 
+		$critical_order = $obj->searchForOrderResults[0]->critical_order ?? null; 
+
+        $response['days_early'] = $days_early;
+        $response['days_late'] = $days_late;
+        $response['ship_date'] = $ship_date;
+        $response['critical_order'] =
+                        ($critical_order === true || $critical_order === 1 || $critical_order === "1" || $critical_order === "true");
 
 		// Check if this appointment already exists.
 		if ($existing_appointments) {

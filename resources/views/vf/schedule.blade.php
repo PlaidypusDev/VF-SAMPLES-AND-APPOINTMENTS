@@ -7,6 +7,7 @@
 <div class="row justify-content-center" style="text-align: center;">
     <div class="col-xl-6 col-lg-7 col-md-8 col-sm-12 col-xs-12" style="margin-top: 3.5rem; margin-bottom: 4rem;">
         <img src="{{ asset('public/images/logo.png') }}" id="vanee-logo" class="mb-2 smaller-logo" style="max-width: 65%;" />
+        <div id="global-alerts" class="mt-3"></div> 
 
 <div class="progress" style="margin-top: 1rem !important; height: 2rem; font-size: 0.9rem;">
   <div id="pbar-1" class="progress-bar" role="progressbar" style="width: 33%" aria-valuenow="15" aria-valuemin="0" aria-valuemax="100">Orders</div>
@@ -28,6 +29,7 @@
 			<span id="confirmation-location" style="font-weight: bold;"></span>
 		</p>
 
+		<div id="cancel-appointment" class="btn btn-danger btn-lg mt-3">Cancel Appointment</div>
 		<div id="update-order" class="btn btn-primary btn-lg mt-3">Update Order</div>
 
 		<button class="btn btn-primary btn-lg mt-3" onClick="document.location='/';">New Order</button>
@@ -187,6 +189,317 @@
     var last_order_count = 0;
     var latest_ship_date = null;
     var latest_ship_date_raw = null;
+    var lastRenderSig = null;
+
+    var __daysEarly = null;
+    var __daysLate  = null;
+    var __currentWindow = null; // { min: Date, max: Date }
+    var __isCritical = false
+
+    function toDateAtMidnight(val) {
+        if (!val) return null;
+        let d;
+        if (typeof val === 'string') {
+            if (/^\d{4}-\d{2}-\d{2}/.test(val)) { // YYYY-MM-DD
+                const [yyyy, mm, dd] = val.split(/[-T]/)[0].split('-').map(n => parseInt(n,10));
+                d = new Date(yyyy, mm - 1, dd);
+            } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) { // MM/DD/YYYY
+                const [mm, dd, yyyy] = val.split('/').map(n => parseInt(n,10));
+                d = new Date(yyyy, mm - 1, dd);
+            } else {
+                d = new Date(val);
+            }
+        } else {
+            d = new Date(val);
+        }
+        if (isNaN(d)) return null;
+        d.setHours(0,0,0,0);
+        return d;
+    }
+
+    function buildWindowFromBaseline(daysEarly, daysLate, baselineLike) {
+        const e = parseInt(daysEarly,10) || 0;
+        const l = parseInt(daysLate,10)  || 0;
+
+        const today = new Date(); today.setHours(0,0,0,0);
+        const baseline = toDateAtMidnight(baselineLike);
+
+        // If baseline (ship_date) is future, center window on it; else start at today
+        let min, max;
+        if (baseline && baseline >= today) {
+            min = new Date(baseline); min.setDate(min.getDate() - e);
+            if (min < today) min = new Date(today);  // no past selection
+            max = new Date(baseline); max.setDate(max.getDate() + l);
+        } else {
+            min = new Date(today);
+            max = new Date(today); max.setDate(max.getDate() + l);
+        }
+
+        // Also respect PICKUP's latest_ship_date floor
+        if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            const ls = toDateAtMidnight(latest_ship_date);
+            if (ls && min < ls) min = ls;
+        }
+
+        return { min, max };
+    }
+
+    function applyDatepickerWindow(daysEarly, daysLate, baselineLike, options) {
+        __daysEarly = (daysEarly != null ? parseInt(daysEarly,10) : null);
+        __daysLate  = (daysLate  != null ? parseInt(daysLate,10)  : null);
+        if (__daysEarly == null && __daysLate == null) return;
+
+        const win = buildWindowFromBaseline(__daysEarly || 0, __daysLate || 0, baselineLike);
+        __currentWindow = win;
+
+        $('#select-datepicker').datepicker('setStartDate', win.min);
+        $('#select-datepicker').datepicker('setEndDate',   win.max);
+
+        if (!options || options.silent !== true) {
+            const msg = `You can schedule between ${win.min.toLocaleDateString('en-US')} and ${win.max.toLocaleDateString('en-US')}.`;
+            clearAlertTypes(["info"]);
+            showAlert('info', msg, { append: true });
+        }
+
+        const cur = $('#select-datepicker').val();
+        if (cur && !validateDateInWindow(toDateAtMidnight(cur))) {
+            $('#select-datepicker').val('');
+            selected_date = '';
+            selected_time = '';
+            $("#select-time").hide();
+            $("#schedule-next").hide();
+        }
+    }
+
+    function validateDateInWindow(dLike) {
+        const d = toDateAtMidnight(dLike);
+        if (!d) return false;
+
+        if (__currentWindow) {
+            if (d < __currentWindow.min || d > __currentWindow.max) return false;
+        } else if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            const min = toDateAtMidnight(latest_ship_date);
+            if (min && d < min) return false;
+        }
+        return true;
+    }
+
+    function computeBaselineFromJson(json){
+        var baseline = null;
+        if (Array.isArray(json.orders)) {
+            for (var i = 0; i < json.orders.length; i++) {
+                var o = json.orders[i];
+                var cand = o.ship_date || (o.details && o.details.ship_date);
+                var d = toDateAtMidnight(cand);
+                if (d && (!baseline || d > baseline)) baseline = d;
+            }
+        }
+        if (!baseline && json.ship_date) baseline = toDateAtMidnight(json.ship_date);
+        return baseline;
+    }
+
+    function fireCriticalAndEarlyLateAlerts(payload){
+        var friendly = (payload.order_type === "PICKUP" ? "Pickup" : "Deliver");
+        var alert_order_type = (friendly === "Pickup" ? "pickup" : "delivery");
+
+        var isCritical = payload.critical_order === true || payload.critical_order === 1 || payload.critical_order === "1";
+        __isCritical = coerceTrueish(payload.critical_order) || __isCritical;
+
+        if (isCritical) {
+            document.body.classList.add("critical-mode");
+            showAlert(
+                "danger",
+                `<strong>CRITICAL ORDER:</strong> production may stop if this ${alert_order_type} order isn't on time.`
+            );
+        }
+
+        var daysEarly = parseInt(payload.days_early, 10) || 0;
+        var daysLate  = parseInt(payload.days_late, 10) || 0;
+
+        if (daysEarly > 0) {
+            showAlert(
+                "warning",
+                `WARNING: this appointment is <strong>${daysEarly}</strong> day${daysEarly === 1 ? "" : "s"} <strong>early</strong> based on your ${alert_order_type} date.`,
+                { append: isCritical }
+            );
+        } else if (daysLate > 0) {
+            showAlert(
+                "warning",
+                `WARNING: this appointment is <strong>${daysLate}</strong> day${daysLate === 1 ? "" : "s"} <strong>late</strong> based on your ${alert_order_type} date.`,
+                { append: isCritical }
+            );
+        }
+    }
+
+
+    function friendlyOrderType() {
+        return (selected_order_type === "DELIVER") ? "Delivery" : "Pick Up";
+    }
+
+    function refreshOrderTypeLabels() {
+        // Update any UI badges that show the friendly type
+        $("#schedule-order-type").text(friendlyOrderType());
+    }
+
+    function getDateHeader() {
+        return (selected_order_type === "DELIVER") ? "Delivery Date" : "Pickup Date";
+    }
+
+    function normalizeDate(d) {
+        var x = new Date(d);
+        x.setHours(0,0,0,0);
+        return x;
+    }
+
+    function enforcePickupMinDateOrAbort(tempDate) {
+        // Only enforce for PICKUP and when we have a computed latest_ship_date
+        if (selected_order_type === "PICKUP" && latest_ship_date instanceof Date) {
+            var chosen = normalizeDate(tempDate);
+            var min    = normalizeDate(latest_ship_date);
+            if (chosen < min) {
+                showAlert("warning", "For pickups, choose a date on or after the latest pickup date.");
+                $("#schedule-next").hide();
+                $("#select-time").hide();
+                return false; 
+            }
+        }
+        return true; 
+    }
+
+    function showAlert(type, msg, opts) {
+        // opts: { append?: boolean, timeout?: number }
+        if ($('#select-location').is(':visible')) return;
+        opts = opts || {};
+        var html = `
+            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
+            ${msg}
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+            </button>
+            </div>`;
+        var $wrap = $("#global-alerts");
+
+         //  If this is critical, force the background class
+        var isCriticalBanner =
+            !!opts.critical ||
+            (type === 'danger' && /critical order/i.test(stripTags(msg)));
+
+        if (isCriticalBanner) {
+            document.body.classList.add("critical-mode");
+        }
+
+        if (opts.append) {
+            $wrap.append(html);
+        } else {
+            $wrap.find(".alert-" + type).remove();
+            $wrap.html(html);
+        }
+
+        if (opts.timeout) {
+            // auto-dismiss the lastest alert inserted
+            setTimeout(function () {
+            $wrap.find(".alert").last().alert("close");
+            }, opts.timeout);
+        }
+    }
+
+    function clearSchedulingInfoAlerts() {
+        try { $("#global-alerts .alert-info").alert("close"); } catch(e) {
+            $("#global-alerts .alert-info").remove();
+        }
+        try { $("#global-alerts .alert-warning").alert("close"); } catch(e) { 
+            $("#global-alerts .alert-warning").remove(); 
+        }
+    }
+
+  
+    // Keep only one CRITICAL banner and toggle background once
+    function ensureCriticalAlertOnce(isCritical, htmlMsg) {
+        if (!isCritical) return;
+        if (!document.body.classList.contains("critical-mode")) {
+            document.body.classList.add("critical-mode");
+        }
+        // If there isn't already a danger alert present, show it
+        if (!$("#global-alerts .alert-danger").length) {
+            showAlert("danger", htmlMsg, { append: true });
+        }
+    }
+
+    // Remove specific alert types so we never stack duplicates
+    function clearAlertTypes(types /* e.g. ["warning","info"] */) {
+        types = types || [];
+        types.forEach(function (t) {
+            $("#global-alerts .alert-" + t).remove(); // hard remove is fine here
+        });
+    }
+
+    function updateEarlyLateAlertFromDates(baselineLike, chosenLike, orderType /* "PICKUP"|"DELIVER" */) {
+        clearAlertTypes(["warning"]); // never stack
+
+        const chosen = toDateAtMidnight(chosenLike);
+        const base   = toDateAtMidnight(baselineLike);
+        if (!chosen || !base) return; // no date picked yet or no baseline => no warning
+
+        const friendly = (orderType === "PICKUP" ? "pickup" : "delivery");
+        const { early, late } = computeEarlyLate(base, chosen);
+
+        if (early > 0) {
+            showAlert(
+            "warning",
+            `WARNING: this appointment is <strong>${early}</strong> day${early === 1 ? "" : "s"} <strong>early</strong> based on your ${friendly} date.`,
+            { append: true }
+            );
+        } else if (late > 0) {
+            showAlert(
+            "warning",
+            `WARNING: this appointment is <strong>${late}</strong> day${late === 1 ? "" : "s"} <strong>late</strong> based on your ${friendly} date.`,
+            { append: true }
+            );
+        }
+    }
+
+    function diffInDaysUTC(aLike, bLike) {
+        // returns integer days (b - a); negative => b earlier than a
+        const a = toDateAtMidnight(aLike);
+        const b = toDateAtMidnight(bLike);
+        if (!a || !b) return null;
+        const ms = b.getTime() - a.getTime();
+        return Math.round(ms / 86400000);
+    }
+
+    function computeEarlyLate(baselineLike, chosenLike) {
+        const d = diffInDaysUTC(baselineLike, chosenLike);
+        if (d == null) return { early: 0, late: 0 };
+        if (d < 0) return { early: Math.abs(d), late: 0 }; // chosen before baseline -> early
+        if (d > 0) return { early: 0, late: d };           // chosen after baseline -> late
+        return { early: 0, late: 0 };                      // same day
+    }
+
+
+    function showWindowBannerIfPossible() {
+        if (!$('#schedule-view').is(':visible')) return;
+        // ensure DP is initialized before setting start/end bounds
+        $('#select-datepicker').datepicker();
+        if (__daysEarly != null || __daysLate != null) {
+            applyDatepickerWindow(__daysEarly, __daysLate, latest_ship_date_raw, { silent: false });
+        }
+    }
+
+
+    function coerceTrueish(v){
+        if (v === true) return true;
+        if (typeof v === 'number') return v === 1;
+        if (typeof v === 'string') {
+            var s = v.trim().toLowerCase();
+            return s === '1' || s === 'true' || s === 'y' || s === 'yes';
+        }
+        return false;
+    }
+
+    function stripTags(s){ 
+        return String(s).replace(/<[^>]+>/g, ''); 
+    }
+
 
     function GetTableHead() {
 	return `
@@ -196,7 +509,7 @@
 					<th scope="col">PO</th>
 					<th scope="col">Weight</th>
 					<th scope="col">Pallets</th>
-					<th scope="col">Ship Date</th>
+                    <th scope="col">${getDateHeader()}</th>
 					<th scope="col">City</th>
 					<!--th scope="col" class="mobile-collapse">State</th-->
 					<th scope="col" class="mobile-collapse">Action</th>
@@ -215,8 +528,11 @@
 
     $(document).ready(function() {
 
+        if (window.__EXISTING_BLOCK__) { return; }
+
 	@if (isset($data['json']))
 	  var json = $.parseJSON("{!! $data['json'] !!}");
+      __isCritical = coerceTrueish(json && json.critical_order);
 
 	  if (json['view'] == "update") {
 
@@ -289,22 +605,81 @@
 		$("#email").val(json['email']);
 		$("#carrier").val(json['carrier']);
 
-		$(".view").hide();
-		//("#information-view").show();
-		$("#schedule-view").show();
-		//$("#back-button").show();
+        var friendlyTitle = (json.order_type === "PICKUP" ? "Pickup" : "Deliver");
 
-		step = 4;
-		UpdatePB();
+        if (json.ui === 'edit') {
+            // --- schedule view (edit path) ---
+            var baseline = computeBaselineFromJson(json);
+            $(".view").hide();
+            $("#schedule-view").show();
+            if (__isCritical) document.body.classList.add("critical-mode");
 
-		if (!$("#vanee-logo").hasClass("smaller-logo"))
-			$("#vanee-logo").addClass("smaller-logo");
+            refreshOrderTypeLabels();
 
-		selected_time = json['time'];
+            // Init/refresh datepicker window BEFORE alerts (so the info banner is correct)
+            $('#select-datepicker').datepicker(); // ensure initialized
+            if (json.days_early != null || json.days_late != null) {
+                applyDatepickerWindow(json.days_early, json.days_late, baseline, { silent: false });
+                updateEarlyLateAlertFromDates(baseline, json.date, json.order_type);
+            }
+
+            // Critical: once, no duplicates
+            ensureCriticalAlertOnce(
+                (json.critical_order === true || json.critical_order === 1 || json.critical_order === "1"),
+                "<strong>CRITICAL ORDER:</strong> production may stop if this " +
+                (json.order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
+            );
+
+
+            forceRepaint();
+            step = 4;
+            UpdatePB();
+
+            if (!$("#vanee-logo").hasClass("smaller-logo"))
+                $("#vanee-logo").addClass("smaller-logo");
+
+            selected_time = json['time'];
+
+            } else {
+            // --- confirmation screen (external link path with no ui=edit) ---
+            var friendlyTitle = (json.order_type === "PICKUP" ? "Pickup" : "Deliver");
+
+            $("#appointment-string").text(friendlyTitle + " Appointment:");
+            $("#location-string").text(friendlyTitle + " At:");
+            $("#confirmation-number").text(json.id || "");
+            $("#confirmation-time").html((json.date || "") + (json.time ? "<br />" + json.time : ""));
+            $("#confirmation-location").html(json.vanee_location || "");
+
+            // Critical: once, no duplicates on success page
+            ensureCriticalAlertOnce(
+                (json.critical_order === true || json.critical_order === 1 || json.critical_order === "1"),
+                "<strong>CRITICAL ORDER:</strong> production may stop if this " +
+                (json.order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
+            );
+
+            const baseline = computeBaselineFromJson(json) || json.ship_date || null;
+            if (baseline && json.date) {
+                updateEarlyLateAlertFromDates(baseline, json.date, json.order_type);
+            }
+
+            $(".view").hide();
+            $("#success-view").show();
+
+            $("#create-order").hide();
+            $("#orders-next").hide();
+            $("#schedule-next").hide();
+            $(".progress").hide();
+
+            if (!$("#vanee-logo").hasClass("smaller-logo"))
+                $("#vanee-logo").addClass("smaller-logo");
+        }
+
 
 	  } else {
 	    $(".view").hide();
 	    $("#schedule-view").show();
+        refreshOrderTypeLabels(); 
+        forceRepaint();
 	    //$("#back-button").show();
 
 	    var step = 3;
@@ -399,12 +774,21 @@
 
 	@endif
 
-	// Button to update a completed order...
-	$("#update-order").click(function() {
-		var confirmation = $("#confirmation-number").html();
+    $("#pick-up").on("click", function () {
+        selected_order_type = "PICKUP";
+        refreshOrderTypeLabels();
+    });
 
-		window.location = "?update=" + confirmation + "&token=" + vanee_token;
-	});
+    $("#deliver").on("click", function () {
+        selected_order_type = "DELIVER";
+        refreshOrderTypeLabels();
+    });
+
+	// Button to update a completed order...
+    $("#update-order").click(function() {
+        var confirmation = $("#confirmation-number").text().trim();
+        window.location = "?update=" + confirmation + "&token=" + encodeURIComponent(vanee_token) + "&ui=edit";
+    });
 
 	// Schedule Order
 	$("#create-order").click(function() {
@@ -479,6 +863,30 @@
 					$("#location-string").html(friendly + " At:");
 					$("#confirmation-location").html(response.vanee_location);
 
+                    var isCritical = response.critical_order === true || response.critical_order === 1 || response.critical_order === "1";
+                    __isCritical = coerceTrueish(response.critical_order) || __isCritical;
+
+
+                    var alert_order_type = (friendly === "Pickup" ?  friendly : `${friendly}y`).toLowerCase();
+
+                    if (isCritical) {
+                        document.body.classList.add("critical-mode");
+                        showAlert(
+                            "danger",
+                            `<strong>CRITICAL ORDER:</strong> production may stop if this ${alert_order_type} order isn't on time.`,
+                        );
+                    }
+               
+                    // Recompute using our local baseline and the user's chosen date.
+                    // Do NOT use response.days_early/days_late (those reflect the API's prior calc).
+                    clearAlertTypes(["warning"]);
+                    var baselineLike =
+                    latest_ship_date_raw ||       // best: built while scheduling from the orders we added
+                    (response.ship_date || null); // fallback if API returns it
+                    if (baselineLike && selected_date) {
+                        updateEarlyLateAlertFromDates(baselineLike, selected_date, selected_order_type);
+                    }
+
 					step = 4;
 					UpdatePB();
 
@@ -515,32 +923,63 @@
 	    }
 	});
 
+    $("#cancel-appointment").on("click", function () {
+        var $btn = $(this);
+
+        var id = $("#confirmation-number").text().trim() || confirmation_code;
+        var token = vanee_token;
+
+        if (!id || !token) {
+            alert("Missing appointment id or token — cannot cancel.");
+            return;
+        }
+
+        if (!confirm("Are you sure you want to cancel this appointment?")) return;
+
+        // Prevent double-clicks
+        if ($btn.hasClass("busy")) return;
+        $btn.addClass("busy").prop("disabled", true).text("Cancelling…");
+
+        $.get("/vf/cancel-appointment/", { id, token })
+            .done(function (res) {
+                if (res.http_status === 200) {
+                    $("#appointment-string").text("Status:");
+                    $("#confirmation-time").html("Appointment canceled");
+                    $("#location-string").text("");
+                    $("#confirmation-location").text("");
+                    $("#cancel-appointment, #update-order").hide();
+
+                    showAlert("success", "Appointment canceled. Redirecting to home…")
+
+                    setTimeout(function () {
+                        window.location = "/";
+                    }, 1600);
+                } else {
+                    showAlert("danger", "Could not cancel appointment (status " + res.http_status + ").");
+                    $("#cancel-appointment").removeClass("already-clicked");
+                }
+            })
+            .fail(function () {
+                showAlert("danger", "Network error while canceling appointment.");
+                $("#cancel-appointment").removeClass("already-clicked");
+            });
+    });
+
+
 	// When a time is selected.
 	$("body").on("click", ".select-time-button", function() {
 		// Validation: Get the selected date.
 		var date = $("#select-datepicker").val();
 
-	    if (date.length == 10) {
-			var temp_date = new Date(date);
-			var temp_date_format = temp_date.toLocaleDateString("en-US");
-		
-			//console.log(temp_date);console.log(latest_ship_date);
-
-			if (temp_date < latest_ship_date) {
-				alert("You must choose a date after the latest ship date.");
-
-				$("#schedule-next").hide();
-				$("#select-time").hide();
-
-				return;
-			}
-		} else {
+	    if (date.length != 10) {
 			$("#schedule-next").hide();
 			$("#select-time").hide();
-
 			return;
 		}
 
+        // block too-early dates for PICKUP
+        var tempDate = new Date(date);
+        if (!enforcePickupMinDateOrAbort(tempDate)) return;
 
 		selected_time = $(this).data("time");
 
@@ -560,19 +999,17 @@
 	    var date = $(this).val();
 
 	    if (date.length == 10 /*&& date != selected_date*/) {
-			var temp_date = new Date(date);
-			var temp_date_format = temp_date.toLocaleDateString("en-US");
 
-			//console.log(temp_date);console.log(latest_ship_date);
-
-			if (temp_date < latest_ship_date) {
-				alert("You must choose a date after the latest ship date.");
-				$("#schedule-next").hide();
-				$("#select-time").hide();
-				return;
-			}
+            var tempDate = new Date(date);
+            if (!enforcePickupMinDateOrAbort(tempDate)) {
+                return; 
+            }
 
 			selected_date = date;
+
+            if (latest_ship_date_raw) {
+                updateEarlyLateAlertFromDates(latest_ship_date_raw, selected_date, selected_order_type);
+            }
 
 			// Remove the next button, if it happens to be visible at this point.
 			$("#schedule-next").hide();
@@ -647,6 +1084,7 @@
 		if ($("#information-view").is(":visible")) {
 			$(".view").hide();
 			$("#schedule-view").show();
+            forceRepaint();
 			$("#schedule-next").show();
 			$(".remove-order").hide();
 
@@ -667,6 +1105,7 @@
 
 	// Scheduling: Next
 	$("body").on("click", "#schedule-next", function() {
+        clearSchedulingInfoAlerts();
 		$(".view").hide();
 		$("#schedule-next").hide();
 		$("#information-view").show();
@@ -689,8 +1128,20 @@
 
 		$(".view").hide();
 		$("#orders-next").hide();
-		$("#schedule-order-type").html(friendly_order_type);
+        refreshOrderTypeLabels();
 		$("#schedule-view").show();
+        if (__isCritical) document.body.classList.add("critical-mode");
+        forceRepaint();
+
+        showWindowBannerIfPossible();
+
+        (function () {
+            var currentPick = $("#select-datepicker").val(); // may be ""
+            if (latest_ship_date_raw) {
+                updateEarlyLateAlertFromDates(latest_ship_date_raw, currentPick, selected_order_type);
+            }
+        })();
+
 		//$("#back-button").show();
 		$(".remove-order").hide();
 
@@ -700,7 +1151,12 @@
 		//if (!$("#vanee-logo").hasClass("smaller-logo"))
 		//        $("#vanee-logo").addClass("smaller-logo");
 
-		$(".table-row").collapse();
+		// $(".table-row").collapse();
+        last_order_count = -1;
+        UpdateTotals();
+        // try this to ensure nested rows are shown
+        // $(".nested-data.collapse").collapse('show');
+
 	});
 
 	/*
@@ -837,6 +1293,35 @@
 
 	            $(".orders").prepend(html);
 
+                var isCritical = (response.critical_order === true) ||
+                                (response.critical_order === 1) ||
+                                (response.critical_order === "1") ||
+                                (typeof response.critical_order === "string" &&
+                                response.critical_order.toLowerCase() === "true");
+
+                // Flip the red backdrop right away (even if alerts are suppressed)
+                if (isCritical) {
+                    document.body.classList.add("critical-mode");
+                } else {
+                    document.body.classList.remove("critical-mode");
+                }
+
+                // Stash/refresh window + warning for when we move to schedule view
+                if (response.days_early != null || response.days_late != null) {
+                    applyDatepickerWindow(response.days_early, response.days_late, response.ship_date, { silent: true });
+                }
+
+                // When the schedule view is eventually shown, re-render the banners without stacking:
+                updateEarlyLateAlertFromDates(response.ship_date, $("#select-datepicker").val(), selected_order_type);
+
+                // Optional (once-only danger banner when not on location view):
+                ensureCriticalAlertOnce(
+                    isCritical,
+                    "<strong>CRITICAL ORDER:</strong> production may stop if this " +
+                    (selected_order_type === "PICKUP" ? "pickup" : "delivery") + " order isn't on time."
+                );
+
+
 				$(".expand-collapse-info").removeClass("show");
 				$(".order-item[data-order-number=" + order_number + "]").click();
 
@@ -967,6 +1452,11 @@
 
 					selected_order_id = order_id;
 					selected_order_type = order_type;
+                    refreshOrderTypeLabels();
+
+                    if (response.days_early != null || response.days_late != null) {
+                        applyDatepickerWindow(response.days_early, response.days_late, response.ship_date, { silent: true });
+                    }
 
 					// Create a friendly string for the order type.
 					var friendly_order_type = (order_type == "DELIVER") ? "Delivery" : "Pick Up";
@@ -1050,6 +1540,7 @@
 		$("#orders-next").show();
 		$("#schedule-next").hide();
 		$(".remove-order").show();
+        forceRepaint();  
     });
 
     $("#pbar-2").click(function() {
@@ -1059,6 +1550,9 @@
 
 		$(".view").hide();
 		$("#schedule-view").show();
+        showWindowBannerIfPossible();
+        refreshOrderTypeLabels();
+        forceRepaint();
 		$("#orders-next").hide();
 		$(".remove-order").hide();
 
@@ -1086,6 +1580,7 @@
     $(".progress-bar").click(function() {
 	if ($(this).hasClass("pbar-disabled"))
 	    return;
+        clearSchedulingInfoAlerts();
 
         $(".progress-bar").removeClass('active');
 
@@ -1144,6 +1639,27 @@
     });
 
     function UpdateTotals() {
+    // Find the visible container for rendering.
+    var $target = $(".view:visible .orders-container");
+    if (!$target.length) return; // nothing to render into on this view
+
+    // gather the orders to render
+    var orderIds = [];
+    $("#order-search-view .order-item").each(function () {
+        orderIds.push($(this).data("order-number"));
+    });
+
+    // Include the active view id so switching tabs always triggers a repaint.
+    var activeViewId = $(".view:visible").attr("id") || "none";
+    var renderSig = activeViewId + "|" + orderIds.join(",") + "|" + total_orders;
+    if (renderSig === lastRenderSig) return;
+
+    if (orderIds.length === 0) {
+        $target.empty().hide();
+        lastRenderSig = renderSig;
+        return;
+    }
+
 	// Initialize variables to store totals.
 	var total_pallets = 0;
 	var total_weight = 0;
@@ -1172,6 +1688,10 @@
 			latest_ship_date = ship_date;
 			latest_ship_date_raw = ship_date_raw;
 		}
+
+        if ($('#schedule-view').is(':visible') && (__daysEarly != null || __daysLate != null)) {
+            applyDatepickerWindow(__daysEarly, __daysLate, latest_ship_date_raw, { silent: true });
+        }
 
 		total_pallets += pallet_count;
 		total_weight += parseInt(weight);
@@ -1213,10 +1733,6 @@
 
 	total_weight = numberWithCommas(total_weight);
 
-	if (total_orders == last_order_count)
-		return;
-	else
-		last_order_count = total_orders;
 
 	html += `
 		<tr class="table-row totals-row">
@@ -1227,10 +1743,12 @@
 		</tr>
 	`;
 
-	$(".orders-container").html(html);
 
-	if (total_orders > 0)
-		$(".orders-container").show();
+    var $target = $(".view:visible .orders-container");
+    $target.html(html);
+
+    if (total_orders > 0) $target.show();
+    lastRenderSig = renderSig;
 
 	// For PICKUP, update the earliest date field.
 	if (selected_order_type == "PICKUP") {
@@ -1265,6 +1783,33 @@
 	return [month, day, year].join('/');
     }
 
+    function forceRepaint() {
+        lastRenderSig = null;
+        UpdateTotals();
+    }
+
+    @if (!empty($data['existing_block']))
+        // hard guard so downstream init doesn't show views again
+        window.__EXISTING_BLOCK__ = true;
+
+        // pre-hide immediately (no jQuery needed)
+        document.documentElement.classList.add('existing-block');
+
+        document.addEventListener('DOMContentLoaded', function () {
+        // If jQuery is there, hide everything schedule-ish
+        if (window.jQuery) {
+            $('#schedule-view, #select-date, #select-time, #schedule-next, #orders-next, #order-search-view, #information-view').hide();
+        }
+
+        var payload = @json($data['existing_block']);
+        if (typeof showAlert === 'function') {
+            showAlert('danger', payload.message || 'An appointment already exists.');
+        } else {
+            alert(payload.message || 'An appointment already exists.');
+        }
+        setTimeout(function(){ window.location.assign(payload.redirect || '/'); }, 5000);
+        });
+    @endif
 
 </script>
 
@@ -1464,6 +2009,67 @@
     #schedule-view .mobile-collapse, #success-view .mobile-collapse {
 	display: none;
     }
+
+    /* prevent flicker while JS loads */
+    .existing-block #schedule-view,
+    .existing-block #select-date,
+    .existing-block #select-time,
+    .existing-block #schedule-next,
+    .existing-block #orders-next,
+    .existing-block #order-search-view,
+    .existing-block #information-view {
+    display: none !important;
+    }
+
+    /* Softer critical backdrop (cool rose, distinct from alert red) */
+    :root {
+    --critical-bg: #f6d2d8;   /* background */
+    --critical-bg-alt: #f6cfe1; /* slightly deeper option */
+    }
+
+    body.critical-mode {
+    background-color: var(--critical-bg) !important;
+    transition: background-color 160ms ease-in;
+    }
+
+    /* Keep content panels readable */
+    body.critical-mode .card,
+    body.critical-mode .orders-table,
+    body.critical-mode .list-group,
+    body.critical-mode .input-group,
+    body.critical-mode .form-control {
+    background: #fff;
+    }
+
+    /* --- Make alert-danger deeper so it stands out on the soft bg --- */
+    #global-alerts .alert-danger,
+    .alert-danger {
+    background-color: #c62828 !important; /* deep red */
+    border-color: #b71c1c !important;
+    color: #fff !important;
+    }
+
+    /* Ensure links/buttons inside the red alert are readable */
+    #global-alerts .alert-danger a,
+    .alert-danger a {
+    color: #fff;
+    text-decoration: underline;
+    }
+
+    /* Optional: bold the title-y bits inside alerts for scanability */
+    #global-alerts .alert strong,
+    .alert strong {
+    font-weight: 700;
+    }
+
+
+
+    /* Smooth switch-in */
+    body { transition: background-color 160ms ease-in; }
+
+    /* Tighter stack spacing for multiple alerts */
+    #global-alerts .alert + .alert { margin-top: .5rem; }
+
 </style>
 
 @endsection

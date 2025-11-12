@@ -129,6 +129,7 @@ Route::domain('appointments.vaneefoods.com')->group(function () {
 
     Route::get('/vf/create-order/', 'VFController@createOrder');
     Route::post('/vf/create-order/', 'VFController@createOrder');
+    Route::get('/vf/cancel-appointment/', 'VFController@deleteAppointment');
 
     Route::get('/vf/sample/order', 'VFController@sampleOrder');
 

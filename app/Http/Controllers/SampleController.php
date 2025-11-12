@@ -1636,7 +1636,7 @@ class SampleController extends Controller
         $secret   = config('services.microsoft_online.client_secret');
 
 		// OAuth URL
-		$login_url = "https://login.microsoftonline.com/" . $tennantid . "/oauth2/v2.0/authorize";
+		$login_url = "https://login.microsoftonline.com/" . $tenantId . "/oauth2/v2.0/authorize";
 
 		// Laravel's method to obtain Session ID.
 		$session_id = session()->getId();
